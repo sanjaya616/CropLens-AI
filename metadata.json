@@ -1,0 +1,8 @@
+{
+  "name": "CropLens AI - Tea Leaf Disease & Pest Screening",
+  "description": "AI-Powered Tea Leaf Disease and Pest Screening and Agricultural Guidance Platform for Sri Lanka, utilizing multimodal Gemini vision and Tea Research Institute (TRI) verified knowledge.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

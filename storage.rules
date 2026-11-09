@@ -1,0 +1,29 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // Helper function to check authentication
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // User private assessment leaf photos
+    match /users/{userId}/assessments/{assessmentId}/{fileName} {
+      // Strictly isolate images: only the owner may read, write, or delete
+      allow read: if isAuthenticated() && request.auth.uid == userId;
+      allow write: if isAuthenticated() && request.auth.uid == userId
+                   && request.resource.size < 5 * 1024 * 1024
+                   && request.resource.contentType.matches('image/(jpeg|jpg|png|webp)');
+      allow delete: if isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Public condition reference images (admin only write)
+    match /conditions/{fileName} {
+      allow read: if true;
+      allow write: if isAuthenticated() && (
+        request.auth.token.admin == true ||
+        request.auth.token.email in ['sanjayalasnan327@gmail.com', 'admin@croplens.lk']
+      );
+    }
+  }
+}
