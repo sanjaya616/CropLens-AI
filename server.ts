@@ -9,9 +9,9 @@ import { assessmentRepository } from './server/repositories/assessmentRepository
 import { conditionRepository } from './server/repositories/conditionRepository';
 import { feedbackRepository } from './server/repositories/feedbackRepository';
 import { storageRepository } from './server/repositories/storageRepository';
-import { requireAuth, requireAdmin, AuthenticatedRequest } from './server/middleware/auth';
+import { requireAuth, requireAdmin, AuthenticatedRequest, isAdministrator } from './server/middleware/auth';
 import { analyzeTeaLeafWithGemini, ImageInput } from './src/services/geminiService';
-import { validateImageSignature, validateImageFile } from './src/utils/validation';
+import { validateImageSignature, validateImageFile, validateConsentPayload } from './src/utils/validation';
 import {
   AssessmentRecord,
   FieldContext,
@@ -56,6 +56,31 @@ const upload = multer({
   },
 });
 
+// Lightweight in-memory sliding-window rate limiter for heavy AI & Storage analysis
+interface RateLimitBucket {
+  timestamps: number[];
+}
+const rateLimitMap = new Map<string, RateLimitBucket>();
+const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
+const RATE_LIMIT_MAX_REQUESTS = 15; // Max 15 assessments per 10 min window per user/IP
+
+function checkRateLimit(key: string): { allowed: boolean; retryAfterSeconds?: number } {
+  const now = Date.now();
+  let bucket = rateLimitMap.get(key);
+  if (!bucket) {
+    bucket = { timestamps: [] };
+    rateLimitMap.set(key, bucket);
+  }
+  bucket.timestamps = bucket.timestamps.filter((t) => now - t < RATE_LIMIT_WINDOW_MS);
+  if (bucket.timestamps.length >= RATE_LIMIT_MAX_REQUESTS) {
+    const oldest = bucket.timestamps[0];
+    const retryAfterSeconds = Math.ceil((oldest + RATE_LIMIT_WINDOW_MS - now) / 1000);
+    return { allowed: false, retryAfterSeconds };
+  }
+  bucket.timestamps.push(now);
+  return { allowed: true };
+}
+
 // ==========================================
 // API ROUTES
 // ==========================================
@@ -63,11 +88,13 @@ const upload = multer({
 // Health Check Endpoint
 app.get('/api/health', (_req: Request, res: Response) => {
   const { isLive } = getFirebaseAdmin();
+  const geminiConfigured = Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'MY_GEMINI_API_KEY');
   res.json({
     status: 'healthy',
+    ready: isLive && geminiConfigured,
     timestamp: new Date().toISOString(),
     firebaseAdminLive: isLive,
-    geminiConfigured: Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'MY_GEMINI_API_KEY'),
+    geminiConfigured,
     environment: process.env.NODE_ENV || 'development',
   });
 });
@@ -109,6 +136,22 @@ app.post(
   requireAuth,
   upload.array('images', 3),
   async (req: AuthenticatedRequest, res: Response) => {
+    // Rate limit check
+    const rateCheck = checkRateLimit(req.user!.uid);
+    if (!rateCheck.allowed) {
+      return res.status(429).json({
+        error: `Assessment rate limit exceeded. Please wait ${rateCheck.retryAfterSeconds} seconds before submitting a new photograph.`,
+      });
+    }
+
+    // Explicit grower consent validation
+    const consentValidation = validateConsentPayload(req.body);
+    if (!consentValidation.valid) {
+      return res.status(400).json({ error: consentValidation.error });
+    }
+
+    const uploadedPaths: string[] = [];
+
     try {
       const files = req.files as Express.Multer.File[];
       if (!files || files.length === 0) {
@@ -165,6 +208,8 @@ app.post(
           signature.mimeType || file.mimetype
         );
 
+        uploadedPaths.push(stored.storagePath);
+
         // Prepare image for Gemini Vision analysis
         validatedGeminiImages.push({
           base64Data: stored.sanitizedBuffer.toString('base64'),
@@ -196,8 +241,14 @@ app.post(
       );
 
       // 6. Build persistent assessment record
-      const consentTimestamp = typeof req.body.consentTimestamp === 'string' ? req.body.consentTimestamp : new Date().toISOString();
-      const consentNoticeVersion = typeof req.body.consentNoticeVersion === 'string' ? req.body.consentNoticeVersion : '1.0';
+      const consentTimestamp =
+        typeof req.body.consentTimestamp === 'string' && req.body.consentTimestamp
+          ? req.body.consentTimestamp
+          : new Date().toISOString();
+      const consentNoticeVersion =
+        typeof req.body.consentNoticeVersion === 'string' && req.body.consentNoticeVersion
+          ? req.body.consentNoticeVersion
+          : '1.0';
 
       const assessmentRecord: AssessmentRecord = {
         assessmentId,
@@ -238,6 +289,12 @@ app.post(
       });
     } catch (error: unknown) {
       console.error('[Assessment Analyze Error]:', error);
+      // Clean up orphaned storage files if workflow failed midway
+      if (uploadedPaths.length > 0) {
+        await storageRepository.cleanUpOrphanedImages(uploadedPaths).catch((cleanupErr) => {
+          console.error('[Orphan Image Cleanup Error]:', cleanupErr);
+        });
+      }
       const message = error instanceof Error ? error.message : 'Analysis failed due to internal error.';
       return res.status(500).json({ error: message });
     }
@@ -266,38 +323,22 @@ app.get('/api/assessments/:id', requireAuth, async (req: AuthenticatedRequest, r
 });
 
 // Authenticated Private Image Stream: GET /api/assessments/:id/images/:imageId
-app.get('/api/assessments/:id/images/:imageId', async (req: Request, res: Response) => {
-  const authHeader = req.headers.authorization;
-  const token = (authHeader && authHeader.startsWith('Bearer '))
-    ? authHeader.split('Bearer ')[1].trim()
-    : (typeof req.query.token === 'string' ? req.query.token.trim() : null);
-
-  if (!token) {
-    return res.status(401).json({ error: 'Authentication required to stream assessment image.' });
-  }
-
-  const { auth: adminAuth, isLive } = getFirebaseAdmin();
-  let uid = token;
-  let isAdmin = false;
-
-  if (adminAuth && isLive) {
-    try {
-      const decoded = await adminAuth.verifyIdToken(token);
-      uid = decoded.uid;
-      isAdmin = decoded.admin === true;
-    } catch {
-      return res.status(401).json({ error: 'Invalid or expired authentication token.' });
-    }
-  }
-
+// Strictly enforces Bearer authentication and verifies ownership or administrator privileges.
+app.get('/api/assessments/:id/images/:imageId', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const isAdmin = isAdministrator(req.user!.uid, req.firebaseToken);
   const assessment = await assessmentRepository.getAssessment(
     req.params.id,
-    uid,
+    req.user!.uid,
     isAdmin
   );
 
   if (!assessment) {
     return res.status(404).json({ error: 'Assessment not found or access denied.' });
+  }
+
+  const isOwner = req.user!.uid === assessment.userId;
+  if (!isOwner && !isAdmin) {
+    return res.status(403).json({ error: 'Access denied. You do not own this assessment record.' });
   }
 
   const targetImage = assessment.images.find((img) => img.imageId === req.params.imageId);
@@ -311,7 +352,7 @@ app.get('/api/assessments/:id/images/:imageId', async (req: Request, res: Respon
   }
 
   res.setHeader('Content-Type', imageResult.mimeType);
-  res.setHeader('Cache-Control', 'private, max-age=86400');
+  res.setHeader('Cache-Control', 'private, no-transform, max-age=3600');
   res.send(imageResult.buffer);
 });
 
@@ -361,11 +402,29 @@ app.get('/api/conditions', async (req: Request, res: Response) => {
   res.json({ conditions });
 });
 
-// Single Condition Guidance
+// Single Condition Guidance (Non-admins can only retrieve APPROVED conditions)
 app.get('/api/conditions/:id', async (req: Request, res: Response) => {
-  const condition = await conditionRepository.getConditionById(req.params.id, false);
+  const authHeader = req.headers.authorization;
+  let isAdmin = false;
+
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.split('Bearer ')[1].trim();
+    const { auth: adminAuth, isLive } = getFirebaseAdmin();
+    if (adminAuth && isLive) {
+      try {
+        const decoded = await adminAuth.verifyIdToken(token);
+        isAdmin = isAdministrator(decoded.uid, decoded);
+      } catch {
+        // Not admin
+      }
+    }
+  }
+
+  const condition = await conditionRepository.getConditionById(req.params.id, !isAdmin);
   if (!condition) {
-    return res.status(404).json({ error: 'Condition record not found.' });
+    return res.status(404).json({
+      error: 'Condition record not found or has not yet received TRI administrator approval.',
+    });
   }
   res.json({ condition });
 });
@@ -425,8 +484,21 @@ app.get('/api/admin/summary', requireAuth, requireAdmin, async (_req: Authentica
 // Admin Create Condition
 app.post('/api/admin/conditions', requireAuth, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   const data = req.body as VerifiedGuidance;
-  if (!data.conditionId || !data.name || !data.category) {
-    return res.status(400).json({ error: 'Missing conditionId, name, or category.' });
+  if (
+    !data.conditionId ||
+    !data.name ||
+    !data.category ||
+    !Array.isArray(data.visibleSymptoms) ||
+    data.visibleSymptoms.length === 0 ||
+    !data.additionalInformation ||
+    !Array.isArray(data.monitoringGuidance) ||
+    !Array.isArray(data.preventionInformation) ||
+    !data.officialSourceTitle ||
+    !data.officialSourceUrl
+  ) {
+    return res.status(400).json({
+      error: 'Missing required guidance fields (conditionId, name, category, symptoms, information, guidance, official source).',
+    });
   }
 
   const saved = await conditionRepository.upsertCondition({
@@ -440,7 +512,7 @@ app.post('/api/admin/conditions', requireAuth, requireAdmin, async (req: Authent
 
 // Admin Update Condition
 app.put('/api/admin/conditions/:id', requireAuth, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
-  const existing = await conditionRepository.getConditionById(req.params.id);
+  const existing = await conditionRepository.getConditionById(req.params.id, false);
   if (!existing) {
     return res.status(404).json({ error: 'Condition record not found.' });
   }
@@ -472,6 +544,15 @@ app.get('/api/dataset/samples', (_req: Request, res: Response) => {
     samples: DATASET_EVALUATION_SAMPLES,
     hasLocalDatasetImages: HAS_LOCAL_DATASET_IMAGES,
   });
+});
+
+// Global Error Handler (Prevents stack trace leaks in production)
+app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  console.error('[Global Error Handler]:', err);
+  const message = isProduction
+    ? 'An unexpected server error occurred.'
+    : (err instanceof Error ? err.message : 'Internal Server Error');
+  res.status(500).json({ error: message });
 });
 
 // ==========================================

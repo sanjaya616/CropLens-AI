@@ -8,13 +8,10 @@ service firebase.storage {
     }
     
     // User private assessment leaf photos
+    // Writes are strictly performed through server-side Sharp EXIF-stripping pipeline via Firebase Admin SDK
     match /users/{userId}/assessments/{assessmentId}/{fileName} {
-      // Strictly isolate images: only the owner may read, write, or delete
-      allow read: if isAuthenticated() && request.auth.uid == userId;
-      allow write: if isAuthenticated() && request.auth.uid == userId
-                   && request.resource.size < 5 * 1024 * 1024
-                   && request.resource.contentType.matches('image/(jpeg|jpg|png|webp)');
-      allow delete: if isAuthenticated() && request.auth.uid == userId;
+      allow read, delete: if isAuthenticated() && request.auth.uid == userId;
+      allow write: if false;
     }
 
     // Public condition reference images (admin only write)

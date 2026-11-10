@@ -1,7 +1,7 @@
 /**
  * CropLens AI - Assessment Repository
- * Implements strict tenant-isolated Firestore persistence:
- * Path: users/{uid}/assessments/{assessmentId}
+ * Implements strict tenant-isolated Cloud Firestore persistence:
+ * Document: users/{uid}/assessments/{assessmentId}
  * Subcollection: users/{uid}/assessments/{assessmentId}/images/{imageId}
  */
 
@@ -9,49 +9,56 @@ import { getFirebaseAdmin } from '../firebase/admin';
 import { AssessmentRecord, AssessmentImage } from '../../src/types';
 import { QueryDocumentSnapshot, DocumentSnapshot, FieldValue } from 'firebase-admin/firestore';
 
-// In-memory fallback if Firestore credentials are not configured in local environment
-const localAssessmentStore = new Map<string, AssessmentRecord>();
-
 export class AssessmentRepository {
   private getDb() {
-    return getFirebaseAdmin().db;
+    const db = getFirebaseAdmin().db;
+    if (!db) {
+      throw new Error(
+        'Cloud Firestore database is not initialized on the server. Please check FIREBASE_PROJECT_ID configuration.'
+      );
+    }
+    return db;
   }
 
   async createAssessment(assessment: AssessmentRecord): Promise<AssessmentRecord> {
     const db = this.getDb();
-    if (db) {
-      try {
-        const userAssessmentRef = db
-          .collection('users')
-          .doc(assessment.userId)
-          .collection('assessments')
-          .doc(assessment.assessmentId);
+    const userAssessmentRef = db
+      .collection('users')
+      .doc(assessment.userId)
+      .collection('assessments')
+      .doc(assessment.assessmentId);
 
-        // Store primary assessment document (excluding raw images array to prevent document size bloat)
-        const { images, ...assessmentDocData } = assessment;
-        await userAssessmentRef.set({
-          ...assessmentDocData,
+    const { images, ...assessmentDocData } = assessment;
+
+    try {
+      const batch = db.batch();
+
+      // Store primary assessment document with server timestamps
+      batch.set(userAssessmentRef, {
+        ...assessmentDocData,
+        createdAtServer: FieldValue.serverTimestamp(),
+        updatedAtServer: FieldValue.serverTimestamp(),
+      });
+
+      // Store image metadata inside nested subcollection
+      const imagesCollectionRef = userAssessmentRef.collection('images');
+      for (const img of images) {
+        const imgDocRef = imagesCollectionRef.doc(img.imageId);
+        batch.set(imgDocRef, {
+          ...img,
           createdAtServer: FieldValue.serverTimestamp(),
-          updatedAtServer: FieldValue.serverTimestamp(),
         });
-
-        // Store each image as a subcollection document
-        const imagesCollectionRef = userAssessmentRef.collection('images');
-        const batch = db.batch();
-        for (const img of images) {
-          const imgDocRef = imagesCollectionRef.doc(img.imageId);
-          batch.set(imgDocRef, img);
-        }
-        await batch.commit();
-        console.log(`[AssessmentRepository] Saved assessment ${assessment.assessmentId} to Firestore.`);
-      } catch (err) {
-        console.warn(`[AssessmentRepository] Firestore write error for ${assessment.assessmentId}:`, err);
       }
-    }
 
-    // Always keep in local fallback store
-    localAssessmentStore.set(assessment.assessmentId, assessment);
-    return assessment;
+      await batch.commit();
+      console.log(`[AssessmentRepository] Saved assessment ${assessment.assessmentId} to Firestore.`);
+      return assessment;
+    } catch (err: unknown) {
+      console.error(`[AssessmentRepository] Firestore transaction failed for ${assessment.assessmentId}:`, err);
+      throw new Error(
+        `Database persistence failed: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
   }
 
   async getAssessment(
@@ -60,84 +67,72 @@ export class AssessmentRepository {
     isAdmin = false
   ): Promise<AssessmentRecord | null> {
     const db = this.getDb();
-    if (db) {
-      try {
-        if (isAdmin) {
-          // Admin can query collectionGroup to access assessment across users
-          const groupQuery = await db
-            .collectionGroup('assessments')
-            .where('assessmentId', '==', assessmentId)
-            .limit(1)
-            .get();
 
-          if (!groupQuery.empty) {
-            const doc: DocumentSnapshot = groupQuery.docs[0];
-            const data = doc.data() as AssessmentRecord;
-            // Fetch images subcollection
-            const imagesSnap = await doc.ref.collection('images').get();
-            const images = imagesSnap.docs.map((d: QueryDocumentSnapshot) => d.data() as AssessmentImage);
-            return { ...data, images };
-          }
-        } else {
-          const docRef = db
-            .collection('users')
-            .doc(requestingUid)
-            .collection('assessments')
-            .doc(assessmentId);
-          const doc = await docRef.get();
-          if (doc.exists) {
-            const data = doc.data() as AssessmentRecord;
-            const imagesSnap = await docRef.collection('images').get();
-            const images = imagesSnap.docs.map((d: QueryDocumentSnapshot) => d.data() as AssessmentImage);
-            return { ...data, images };
-          }
+    try {
+      if (isAdmin) {
+        // Administrator queries collectionGroup across all plantations
+        const groupQuery = await db
+          .collectionGroup('assessments')
+          .where('assessmentId', '==', assessmentId)
+          .limit(1)
+          .get();
+
+        if (groupQuery.empty) {
+          return null;
         }
-      } catch (err) {
-        console.warn(`[AssessmentRepository] Firestore query error for ${assessmentId}:`, err);
-      }
-    }
 
-    // Local fallback check
-    const local = localAssessmentStore.get(assessmentId);
-    if (!local) return null;
-    if (local.userId !== requestingUid && !isAdmin) {
-      return null;
+        const doc: DocumentSnapshot = groupQuery.docs[0];
+        const data = doc.data() as AssessmentRecord;
+        const imagesSnap = await doc.ref.collection('images').get();
+        const images = imagesSnap.docs.map((d: QueryDocumentSnapshot) => d.data() as AssessmentImage);
+        return { ...data, images };
+      }
+
+      // Farmer queries their own tenant partition strictly
+      const docRef = db
+        .collection('users')
+        .doc(requestingUid)
+        .collection('assessments')
+        .doc(assessmentId);
+
+      const doc = await docRef.get();
+      if (!doc.exists) {
+        return null;
+      }
+
+      const data = doc.data() as AssessmentRecord;
+      const imagesSnap = await docRef.collection('images').get();
+      const images = imagesSnap.docs.map((d: QueryDocumentSnapshot) => d.data() as AssessmentImage);
+      return { ...data, images };
+    } catch (err: unknown) {
+      console.error(`[AssessmentRepository] Firestore query error for ${assessmentId}:`, err);
+      throw new Error(`Failed to retrieve assessment: ${err instanceof Error ? err.message : String(err)}`);
     }
-    return local;
   }
 
   async listAssessmentsForUser(userId: string): Promise<AssessmentRecord[]> {
     const db = this.getDb();
-    if (db) {
-      try {
-        const snapshot = await db
-          .collection('users')
-          .doc(userId)
-          .collection('assessments')
-          .orderBy('createdAt', 'desc')
-          .get();
 
-        const results: AssessmentRecord[] = [];
-        for (const doc of snapshot.docs) {
-          const data = doc.data() as AssessmentRecord;
-          const imagesSnap = await doc.ref.collection('images').get();
-          const images = imagesSnap.docs.map((d: QueryDocumentSnapshot) => d.data() as AssessmentImage);
-          results.push({ ...data, images });
-        }
-        return results;
-      } catch (err) {
-        console.warn(`[AssessmentRepository] Firestore list error for ${userId}:`, err);
-      }
-    }
+    try {
+      const snapshot = await db
+        .collection('users')
+        .doc(userId)
+        .collection('assessments')
+        .orderBy('createdAt', 'desc')
+        .get();
 
-    // Local fallback
-    const list: AssessmentRecord[] = [];
-    for (const asm of localAssessmentStore.values()) {
-      if (asm.userId === userId) {
-        list.push(asm);
+      const results: AssessmentRecord[] = [];
+      for (const doc of snapshot.docs) {
+        const data = doc.data() as AssessmentRecord;
+        const imagesSnap = await doc.ref.collection('images').get();
+        const images = imagesSnap.docs.map((d: QueryDocumentSnapshot) => d.data() as AssessmentImage);
+        results.push({ ...data, images });
       }
+      return results;
+    } catch (err: unknown) {
+      console.error(`[AssessmentRepository] Firestore list error for user ${userId}:`, err);
+      throw new Error(`Failed to list user assessments: ${err instanceof Error ? err.message : String(err)}`);
     }
-    return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }
 
   async deleteAssessment(
@@ -151,29 +146,28 @@ export class AssessmentRepository {
     }
 
     const imagePaths = existing.images.map((img) => img.storagePath).filter(Boolean);
-
     const db = this.getDb();
-    if (db) {
-      try {
-        const assessmentRef = db
-          .collection('users')
-          .doc(existing.userId)
-          .collection('assessments')
-          .doc(assessmentId);
 
-        // Delete images subcollection
-        const imagesSnap = await assessmentRef.collection('images').get();
-        const batch = db.batch();
-        imagesSnap.docs.forEach((doc: QueryDocumentSnapshot) => batch.delete(doc.ref));
-        batch.delete(assessmentRef);
-        await batch.commit();
-      } catch (err) {
-        console.warn(`[AssessmentRepository] Firestore delete error for ${assessmentId}:`, err);
-      }
+    try {
+      const assessmentRef = db
+        .collection('users')
+        .doc(existing.userId)
+        .collection('assessments')
+        .doc(assessmentId);
+
+      const imagesSnap = await assessmentRef.collection('images').get();
+      const batch = db.batch();
+
+      imagesSnap.docs.forEach((doc: QueryDocumentSnapshot) => batch.delete(doc.ref));
+      batch.delete(assessmentRef);
+      await batch.commit();
+
+      console.log(`[AssessmentRepository] Deleted assessment ${assessmentId} from Firestore.`);
+      return { success: true, imagePaths };
+    } catch (err: unknown) {
+      console.error(`[AssessmentRepository] Firestore delete error for ${assessmentId}:`, err);
+      throw new Error(`Failed to delete assessment record: ${err instanceof Error ? err.message : String(err)}`);
     }
-
-    localAssessmentStore.delete(assessmentId);
-    return { success: true, imagePaths };
   }
 
   async getGlobalAssessmentStats(): Promise<{
@@ -189,60 +183,41 @@ export class AssessmentRepository {
     }>;
   }> {
     const db = this.getDb();
-    if (db) {
-      try {
-        const snapshot = await db.collectionGroup('assessments').get();
-        const distribution: Record<string, number> = {};
-        const all: AssessmentRecord[] = [];
 
-        snapshot.docs.forEach((doc: QueryDocumentSnapshot) => {
-          const asm = doc.data() as AssessmentRecord;
-          all.push(asm);
-          const cid = asm.primaryCondition?.id || 'UNKNOWN';
-          distribution[cid] = (distribution[cid] || 0) + 1;
-        });
+    try {
+      const snapshot = await db.collectionGroup('assessments').get();
+      const distribution: Record<string, number> = {};
+      const all: AssessmentRecord[] = [];
 
-        all.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      snapshot.docs.forEach((doc: QueryDocumentSnapshot) => {
+        const asm = doc.data() as AssessmentRecord;
+        all.push(asm);
+        const cid = asm.primaryCondition?.id || 'UNKNOWN';
+        distribution[cid] = (distribution[cid] || 0) + 1;
+      });
 
-        return {
-          totalAssessments: all.length,
-          conditionDistribution: distribution,
-          recentAssessments: all.slice(0, 5).map((a) => ({
-            assessmentId: a.assessmentId,
-            userId: a.userId,
-            condition: a.primaryCondition?.name || a.primaryCondition?.id || 'Unknown',
-            category: a.primaryCondition?.category || 'unclear',
-            district: a.district,
-            createdAt: a.createdAt,
-          })),
-        };
-      } catch (err) {
-        console.warn('[AssessmentRepository] Error querying collectionGroup assessments:', err);
-      }
+      all.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+      return {
+        totalAssessments: all.length,
+        conditionDistribution: distribution,
+        recentAssessments: all.slice(0, 5).map((a) => ({
+          assessmentId: a.assessmentId,
+          userId: a.userId,
+          condition: a.primaryCondition?.name || a.primaryCondition?.id || 'Unknown',
+          category: a.primaryCondition?.category || 'unclear',
+          district: a.district,
+          createdAt: a.createdAt,
+        })),
+      };
+    } catch (err: unknown) {
+      console.error('[AssessmentRepository] Error querying collectionGroup assessments:', err);
+      return {
+        totalAssessments: 0,
+        conditionDistribution: {},
+        recentAssessments: [],
+      };
     }
-
-    // Local fallback
-    const distribution: Record<string, number> = {};
-    const all = Array.from(localAssessmentStore.values());
-    for (const asm of all) {
-      const cid = asm.primaryCondition?.id || 'UNKNOWN';
-      distribution[cid] = (distribution[cid] || 0) + 1;
-    }
-
-    all.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-
-    return {
-      totalAssessments: all.length,
-      conditionDistribution: distribution,
-      recentAssessments: all.slice(0, 5).map((a) => ({
-        assessmentId: a.assessmentId,
-        userId: a.userId,
-        condition: a.primaryCondition?.name || a.primaryCondition?.id || 'Unknown',
-        category: a.primaryCondition?.category || 'unclear',
-        district: a.district,
-        createdAt: a.createdAt,
-      })),
-    };
   }
 }
 

@@ -170,31 +170,45 @@ export function normalizeMatchLevel(level: unknown): MatchLevel {
 }
 
 /**
+ * Validates mandatory consent parameters.
+ * Rejects missing or false consent without fabricating timestamps.
+ */
+export function validateConsentPayload(body: { consentConfirmed?: unknown; consentNoticeVersion?: unknown }): { valid: boolean; error?: string } {
+  if (body.consentConfirmed !== 'true' && body.consentConfirmed !== true) {
+    return { valid: false, error: 'Explicit grower consent is required before analyzing crop photographs.' };
+  }
+  if (!body.consentNoticeVersion || typeof body.consentNoticeVersion !== 'string' || !body.consentNoticeVersion.trim()) {
+    return { valid: false, error: 'Missing or invalid consentNoticeVersion parameter.' };
+  }
+  return { valid: true };
+}
+
+/**
  * Validates and sanitizes AI JSON output against strict schema and allowed IDs.
  * Rejects hallucinated IDs or fabricated percentages.
  */
 export function validateAndSanitizeAiResponse(raw: unknown): GeminiAnalysisResponse {
   const fallbackResponse: GeminiAnalysisResponse = {
-    cropSupported: true,
-    isTeaLeaf: true,
-    imageQuality: 'good',
+    cropSupported: false,
+    isTeaLeaf: false,
+    imageQuality: 'poor',
     primaryCondition: {
       id: 'UNKNOWN',
       name: 'Inconclusive / Mixed Symptoms',
       category: 'unclear',
       matchLevel: 'insufficient',
-      confidenceDescription: 'Insufficient evidence to confirm specific category.',
+      confidenceDescription: 'Unable to analyze image or extract structured foliar assessment.',
     },
     alternativeConditions: [],
-    visualObservations: ['Visual inspection did not detect conclusive pathogen characteristics.'],
-    possibleSymptoms: ['Non-specific leaf appearance'],
-    contextConsiderations: ['User field context reviewed.'],
-    followUpQuestions: ['Has this symptom spread across neighboring tea bushes?'],
-    unknownFactors: ['Microscopic fungal structures cannot be confirmed from photo alone.'],
+    visualObservations: ['Visual inspection could not determine leaf characteristics.'],
+    possibleSymptoms: ['Unverified foliar markings'],
+    contextConsiderations: ['Context could not be evaluated.'],
+    followUpQuestions: ['Please provide a clearer photograph of the affected tea bush.'],
+    unknownFactors: ['AI analysis was unable to process the image output reliably.'],
     photoQuality: {
-      usable: true,
-      problems: [],
-      retakeRecommended: false,
+      usable: false,
+      problems: ['Analysis failed or output could not be parsed'],
+      retakeRecommended: true,
     },
     expertReviewRecommended: true,
     guidanceIds: ['UNKNOWN'],

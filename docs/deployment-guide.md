@@ -85,3 +85,59 @@ npm run build
 npm run start
 ```
 The server binds to `0.0.0.0:3000`, serving the compiled React frontend from `/dist` and mounting all authenticated `/api/*` endpoints.
+
+---
+
+## 2. Local Development on Windows 11 with Visual Studio Code
+
+### 2.1 Prerequisites on Windows 11
+1. **Node.js**: Install Node.js LTS (v20.x or v22.x) from [nodejs.org](https://nodejs.org/). Verify in PowerShell:
+   ```powershell
+   node -v
+   npm -v
+   ```
+2. **Visual Studio Code**: Install from [code.visualstudio.com](https://code.visualstudio.com/).
+   - Recommended VS Code Extensions:
+     - *Tailwind CSS IntelliSense* (`bradlc.vscode-tailwindcss`)
+     - *ESLint* (`dbaeumer.vscode-eslint`)
+     - *Pretty TypeScript Errors* (`yoavbls.pretty-ts-errors`)
+3. **PowerShell Execution Policy**: If running npm scripts is blocked by execution policy on Windows 11, open PowerShell as Administrator and run:
+   ```powershell
+   Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+   ```
+4. **Git for Windows & Line Endings**:
+   ```powershell
+   git config --global core.autocrlf true
+   ```
+
+### 2.2 Native Binary Dependencies (Sharp on Windows)
+The project utilizes `sharp` for EXIF metadata stripping and image sanitization. When running `npm install` on Windows 11 (x64), npm will automatically fetch `@img/sharp-win32-x64`. If you encounter build tools warnings, install the standard Visual Studio C++ Build Tools (or use pre-built binaries which npm downloads by default).
+
+### 2.3 Local Environment Configuration
+1. Clone or extract the project repository into a local folder:
+   ```powershell
+   cd C:\Users\<Username>\Projects\croplens-ai
+   ```
+2. Copy `.env.example` to `.env`:
+   ```powershell
+   Copy-Item .env.example .env
+   ```
+3. Open the folder in VS Code:
+   ```powershell
+   code .
+   ```
+4. Fill in your `GEMINI_API_KEY` and Firebase credentials in `.env`.
+
+### 2.4 Running the Development Server
+Open the integrated terminal in VS Code (`Ctrl + ~`) and execute:
+```powershell
+npm run dev
+```
+The unified development server will launch on `http://localhost:3000`. Hot module reload (Vite middleware) and server API endpoints run concurrently in a single process.
+
+### 2.5 Running the Test Suite
+```powershell
+npm test
+```
+Executes the native `node:test` suite covering file binary signature validation, condition taxonomy boundaries, qualitative match level parsing, consent enforcement, and administrator authorization logic.
+

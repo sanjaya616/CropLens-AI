@@ -37,6 +37,7 @@ export async function analyzeAssessmentApi(
   if (fieldContext) {
     formData.append('fieldContext', JSON.stringify(fieldContext));
   }
+  formData.append('consentConfirmed', 'true');
   formData.append('consentTimestamp', new Date().toISOString());
   formData.append('consentNoticeVersion', consentNoticeVersion);
 

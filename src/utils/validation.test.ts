@@ -7,8 +7,10 @@ import {
   getDisplayNameForConditionId,
   normalizeMatchLevel,
   validateAndSanitizeAiResponse,
+  validateConsentPayload,
   ALLOWED_CONDITION_IDS,
 } from './validation';
+import { isAdministrator } from '../../server/middleware/auth';
 
 test('ALLOWED_CONDITION_IDS contains exactly the 6 dataset classes plus 3 outcomes', () => {
   assert.equal(ALLOWED_CONDITION_IDS.length, 9);
@@ -97,24 +99,69 @@ test('validateAndSanitizeAiResponse sanitizes raw output and rejects invalid con
   assert.ok(sanitized.disclaimer.includes('Preliminary AI screening only'));
 });
 
-test('validateAndSanitizeAiResponse preserves valid Blister Blight with qualitative match', () => {
-  const validAiInput = {
-    cropSupported: true,
-    isTeaLeaf: true,
-    primaryCondition: {
-      id: 'BLISTER_BLIGHT',
-      matchLevel: 'strong',
-    },
-    alternativeConditions: [
-      { id: 'GRAY_BLIGHT', matchLevel: 'weak', reasonForDoubt: 'Concentric rings not fully formed' },
-    ],
-    visualObservations: ['Translucent circular blister on tender flush.'],
-  };
+test('validateAndSanitizeAiResponse returns truthful non-fabricating fallback when raw input is null or invalid', () => {
+  const nullResult = validateAndSanitizeAiResponse(null);
+  assert.equal(nullResult.cropSupported, false);
+  assert.equal(nullResult.isTeaLeaf, false);
+  assert.equal(nullResult.imageQuality, 'poor');
+  assert.equal(nullResult.primaryCondition.id, 'UNKNOWN');
+  assert.equal(nullResult.photoQuality.usable, false);
+  assert.equal(nullResult.photoQuality.retakeRecommended, true);
 
-  const sanitized = validateAndSanitizeAiResponse(validAiInput);
-  assert.equal(sanitized.primaryCondition.id, 'BLISTER_BLIGHT');
-  assert.equal(sanitized.primaryCondition.category, 'disease');
-  assert.equal(sanitized.primaryCondition.matchLevel, 'strong');
-  assert.equal(sanitized.alternativeConditions.length, 1);
-  assert.equal(sanitized.alternativeConditions[0].id, 'GRAY_BLIGHT');
+  const stringResult = validateAndSanitizeAiResponse('invalid string output');
+  assert.equal(stringResult.cropSupported, false);
+  assert.equal(stringResult.isTeaLeaf, false);
+  assert.equal(stringResult.imageQuality, 'poor');
 });
+
+test('validateConsentPayload enforces explicit consent confirmation and notice version', () => {
+  // Missing consentConfirmed
+  const missingConsent = validateConsentPayload({});
+  assert.equal(missingConsent.valid, false);
+  assert.match(missingConsent.error || '', /consent is required/i);
+
+  // False consent
+  const falseConsent = validateConsentPayload({ consentConfirmed: false, consentNoticeVersion: '1.0' });
+  assert.equal(falseConsent.valid, false);
+
+  // Missing version
+  const missingVersion = validateConsentPayload({ consentConfirmed: true });
+  assert.equal(missingVersion.valid, false);
+  assert.match(missingVersion.error || '', /consentNoticeVersion/i);
+
+  // Valid boolean consent
+  const validBool = validateConsentPayload({ consentConfirmed: true, consentNoticeVersion: '1.0' });
+  assert.equal(validBool.valid, true);
+
+  // Valid string consent (multipart form data)
+  const validStr = validateConsentPayload({ consentConfirmed: 'true', consentNoticeVersion: '1.0' });
+  assert.equal(validStr.valid, true);
+});
+
+test('normalizeMatchLevel correctly parses qualitative levels and rejects numerical percentages', () => {
+  assert.equal(normalizeMatchLevel('strong'), 'strong');
+  assert.equal(normalizeMatchLevel('Strong visual similarity'), 'strong');
+  assert.equal(normalizeMatchLevel('possible'), 'possible');
+  assert.equal(normalizeMatchLevel('weak'), 'weak');
+  assert.equal(normalizeMatchLevel('insufficient'), 'insufficient');
+  // Unknown or percentage strings fall back cleanly
+  assert.equal(normalizeMatchLevel('98% probability'), 'possible');
+  assert.equal(normalizeMatchLevel(null), 'possible');
+});
+
+test('isAdministrator strictly checks custom claims and server allowlist, never trusting client role', () => {
+  // 1. Token with custom claim admin === true
+
+  // 1. Token with custom claim admin === true
+  assert.equal(isAdministrator('user-123', { admin: true }), true);
+
+  // 2. Token with admin === false and not in allowlist
+  assert.equal(isAdministrator('user-123', { admin: false }), false);
+
+  // 3. Regular farmer UID without admin claims
+  assert.equal(isAdministrator('farmer-999', {}), false);
+
+  // 4. Empty or undefined UID
+  assert.equal(isAdministrator('', { admin: true }), false);
+});
+

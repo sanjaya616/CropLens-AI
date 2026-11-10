@@ -12,6 +12,7 @@ import {
   Menu,
   X,
   User,
+  AlertTriangle,
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -20,8 +21,19 @@ interface NavbarProps {
 }
 
 export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate }) => {
-  const { user, role, isAdmin, logout } = useAuth();
+  const { user, role, isAdmin, emailVerified, sendVerificationEmail, logout } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [verificationSent, setVerificationSent] = useState(false);
+
+  const handleSendVerification = async () => {
+    try {
+      await sendVerificationEmail();
+      setVerificationSent(true);
+      setTimeout(() => setVerificationSent(false), 4000);
+    } catch (e) {
+      console.error('Failed to send verification email:', e);
+    }
+  };
 
   const navLinks = [
     { label: 'Home', path: '/', icon: Sprout },
@@ -41,6 +53,22 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate }) => {
 
   return (
     <header className="sticky top-0 z-40 bg-white/95 backdrop-blur border-b border-stone-200">
+      {user && !emailVerified && (
+        <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 text-xs text-amber-900 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+            <span>
+              Your email address ({user.email}) is not yet verified.
+            </span>
+          </div>
+          <button
+            onClick={handleSendVerification}
+            className="text-emerald-800 hover:text-emerald-950 font-bold underline ml-2 shrink-0 cursor-pointer"
+          >
+            {verificationSent ? 'Verification Email Sent!' : 'Resend Verification Email'}
+          </button>
+        </div>
+      )}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           {/* Logo & Brand */}

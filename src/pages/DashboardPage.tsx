@@ -14,6 +14,7 @@ import {
   Sprout,
   TrendingUp,
 } from 'lucide-react';
+import { AuthenticatedImage } from '../components/AuthenticatedImage';
 
 interface DashboardPageProps {
   navigate: (path: string) => void;
@@ -186,9 +187,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ navigate }) => {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {assessments.map((asm) => {
               const rawImgUrl = asm.images?.[0]?.downloadUrl;
-              const authenticatedImgUrl = rawImgUrl
-                ? `${rawImgUrl}${rawImgUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(token || '')}`
-                : null;
               const isPest = asm.primaryCondition.category === 'pest';
               const isHealthy = asm.primaryCondition.category === 'healthy';
 
@@ -198,15 +196,11 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ navigate }) => {
                   className="bg-white border border-stone-200 rounded-2xl overflow-hidden shadow-xs hover:border-emerald-500/80 transition-all flex flex-col justify-between"
                 >
                   <div className="aspect-16/10 bg-gradient-to-br from-stone-100 to-emerald-50/50 relative overflow-hidden flex items-center justify-center">
-                    {authenticatedImgUrl ? (
-                      <img
-                        src={authenticatedImgUrl}
+                    {rawImgUrl ? (
+                      <AuthenticatedImage
+                        src={rawImgUrl}
                         alt={asm.primaryCondition.name}
                         className="w-full h-full object-cover"
-                        onError={(e) => {
-                          // Hide broken image and fall back to icon background
-                          e.currentTarget.style.display = 'none';
-                        }}
                       />
                     ) : (
                       <Sprout className="w-12 h-12 text-emerald-800/20" />

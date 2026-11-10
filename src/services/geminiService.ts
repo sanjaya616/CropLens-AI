@@ -43,35 +43,35 @@ const RESPONSE_SCHEMA_EXAMPLE = {
   isTeaLeaf: true,
   imageQuality: 'good',
   primaryCondition: {
-    id: 'BLISTER_BLIGHT',
-    name: 'Blister Blight',
-    category: 'disease',
-    matchLevel: 'possible',
-    confidenceDescription: 'Possible visual similarity based on translucent circular spotting on tender flush.',
+    id: '<Condition ID: ALGAL_LEAF_SPOT | BLACK_BLIGHT | BLISTER_BLIGHT | GRAY_BLIGHT | SPIDER_MITES | HEALTHY | UNKNOWN | NOT_TEA | POOR_IMAGE>',
+    name: '<Condition Display Name>',
+    category: '<disease | pest | healthy | unclear>',
+    matchLevel: '<strong | possible | weak | insufficient>',
+    confidenceDescription: '<Neutral visual explanation of visible leaf markings>',
   },
   alternativeConditions: [
     {
-      id: 'GRAY_BLIGHT',
-      name: 'Gray Blight',
-      category: 'disease',
-      matchLevel: 'weak',
-      reasonForDoubt: 'Concentric brown rings not yet distinctly observed.',
+      id: '<Alternative Condition ID>',
+      name: '<Alternative Name>',
+      category: '<disease | pest | healthy | unclear>',
+      matchLevel: '<strong | possible | weak | insufficient>',
+      reasonForDoubt: '<Brief visual distinction factor>',
     },
   ],
   visualObservations: [
-    'Tender young leaf blade showing translucent yellowish depression on upper surface.',
+    '<Factual observation of leaf surface, margin, or discoloration>',
   ],
   possibleSymptoms: [
-    'Bulging blister formation on reverse side of leaf flush.',
+    '<Specific symptom observed on blade, veins, or petiole>',
   ],
   contextConsiderations: [
-    'High elevation monsoon moisture reported by grower accelerates fungal sporulation.',
+    '<Agronomic or environmental context factor considered>',
   ],
   followUpQuestions: [
-    'Are new harvestable buds also showing circular spots or wilting?',
+    '<Relevant question regarding distribution or field history>',
   ],
   unknownFactors: [
-    'Microscopic fungal basidiospores cannot be verified from photograph alone.',
+    '<Diagnostic limitation that cannot be confirmed from photograph alone>',
   ],
   photoQuality: {
     usable: true,
@@ -79,7 +79,7 @@ const RESPONSE_SCHEMA_EXAMPLE = {
     retakeRecommended: false,
   },
   expertReviewRecommended: true,
-  guidanceIds: ['BLISTER_BLIGHT'],
+  guidanceIds: ['<Primary Condition ID>'],
   disclaimer: 'Preliminary AI screening only. This is not a confirmed plant disease diagnosis. Consult Tea Research Institute (TRI) extension officers.',
 };
 
@@ -139,7 +139,7 @@ ${JSON.stringify(RESPONSE_SCHEMA_EXAMPLE, null, 2)}
 
   try {
     const response = await ai.models.generateContent({
-      model: GEMINI_MODEL,
+      model: process.env.GEMINI_MODEL || GEMINI_MODEL,
       contents: [
         {
           role: 'user',

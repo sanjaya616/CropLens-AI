@@ -8,6 +8,7 @@ import {
 } from '../services/api';
 import { ExpertReferralCard } from '../components/ExpertReferralCard';
 import { SafetyDisclaimer } from '../components/SafetyDisclaimer';
+import { AuthenticatedImage } from '../components/AuthenticatedImage';
 import {
   ArrowLeft,
   Calendar,
@@ -187,8 +188,8 @@ export const AssessmentResultPage: React.FC<AssessmentResultPageProps> = ({
             <div className="md:col-span-5 space-y-2">
               <div className="aspect-4/3 rounded-2xl overflow-hidden bg-stone-100 border border-stone-200 relative">
                 {assessment.images?.[0]?.downloadUrl ? (
-                  <img
-                    src={`${assessment.images[0].downloadUrl}${assessment.images[0].downloadUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(token || '')}`}
+                  <AuthenticatedImage
+                    src={assessment.images[0].downloadUrl}
                     alt={primary.name}
                     className="w-full h-full object-cover"
                   />
@@ -219,8 +220,8 @@ export const AssessmentResultPage: React.FC<AssessmentResultPageProps> = ({
                       key={img.imageId}
                       className="aspect-4/3 rounded-xl overflow-hidden bg-stone-100 border border-stone-200"
                     >
-                      <img
-                        src={`${img.downloadUrl}${img.downloadUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(token || '')}`}
+                      <AuthenticatedImage
+                        src={img.downloadUrl}
                         alt={`Additional view ${i + 2}`}
                         className="w-full h-full object-cover"
                       />

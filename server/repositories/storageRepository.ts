@@ -1,12 +1,11 @@
-import { getFirebaseAdmin } from '../firebase/admin';
-import fs from 'fs';
-import path from 'path';
-import sharp from 'sharp';
+/**
+ * CropLens AI - Secure Storage Repository
+ * Handles image sanitization (EXIF stripping, dimension checks, safe re-encoding)
+ * and genuine persistence to private Firebase Storage buckets.
+ */
 
-const LOCAL_STORAGE_DIR = path.resolve('.storage');
-if (!fs.existsSync(LOCAL_STORAGE_DIR)) {
-  fs.mkdirSync(LOCAL_STORAGE_DIR, { recursive: true });
-}
+import { getFirebaseAdmin } from '../firebase/admin';
+import sharp from 'sharp';
 
 export interface StoredImageResult {
   storagePath: string;
@@ -23,8 +22,9 @@ export class StorageRepository {
   }
 
   /**
-   * Sanitizes an image with sharp (strips EXIF, checks dimensions, re-encodes safely)
-   * and saves it to Firebase Storage (or secure local storage fallback).
+   * Sanitizes an uploaded photograph using Sharp (stripping EXIF/GPS, enforcing dimension boundaries,
+   * safe re-encoding) and uploads to private Firebase Storage.
+   * Throws an explicit error if Firebase Storage is unavailable or upload fails.
    */
   async uploadAssessmentImage(
     userId: string,
@@ -33,12 +33,20 @@ export class StorageRepository {
     originalBuffer: Buffer,
     originalMime: string
   ): Promise<StoredImageResult> {
-    // 1. Sanitize image with sharp: strip EXIF (including GPS), resize if excessively large (> 2560px)
-    let processed = sharp(originalBuffer).rotate(); // auto-orient based on EXIF before stripping
+    if (!originalBuffer || originalBuffer.length === 0) {
+      throw new Error('Upload rejected: Empty image buffer.');
+    }
+
+    if (originalBuffer.length > 5 * 1024 * 1024) {
+      throw new Error('Upload rejected: Image exceeds maximum limit of 5.0 MB.');
+    }
+
+    // 1. Sanitize image with sharp: auto-orient, strip EXIF and GPS, enforce pixel limits
+    let processed = sharp(originalBuffer, { failOn: 'error' }).rotate();
     const metadata = await processed.metadata();
 
     if (!metadata.format) {
-      throw new Error('Image decoding failed. Corrupted or unsupported image file.');
+      throw new Error('Image decoding failed: Unrecognized or corrupted image binary.');
     }
 
     // Limit maximum dimensions (max 2560px on longest edge)
@@ -46,7 +54,7 @@ export class StorageRepository {
       processed = processed.resize(2560, 2560, { fit: 'inside', withoutEnlargement: true });
     }
 
-    // Re-encode to remove any embedded malicious payloads or unwanted EXIF
+    // Safe re-encoding: strips all embedded metadata / GPS and forces clean standardized encoding
     let outputBuffer: Buffer;
     let targetMime = originalMime;
 
@@ -65,27 +73,33 @@ export class StorageRepository {
     const safeFileName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
     const storagePath = `users/${userId}/assessments/${assessmentId}/${safeFileName}`;
 
-    // 2. Upload to Firebase Storage bucket if live, otherwise write to secure local storage
+    // 2. Upload to Firebase Storage bucket
     const bucket = this.getBucket();
-    if (bucket) {
-      try {
-        const file = bucket.file(storagePath);
-        await file.save(outputBuffer, {
+    if (!bucket) {
+      throw new Error(
+        'Firebase Storage bucket is not available. Please ensure FIREBASE_STORAGE_BUCKET is configured in server environment.'
+      );
+    }
+
+    try {
+      const file = bucket.file(storagePath);
+      await file.save(outputBuffer, {
+        resumable: false,
+        metadata: {
+          contentType: targetMime,
+          cacheControl: 'private, no-transform, max-age=3600',
           metadata: {
-            contentType: targetMime,
-            metadata: {
-              uploadedBy: userId,
-              assessmentId,
-            },
+            uploadedBy: userId,
+            assessmentId,
+            sanitizedAt: new Date().toISOString(),
           },
-        });
-        console.log(`[StorageRepository] Saved to Firebase Storage bucket: ${storagePath}`);
-      } catch (err) {
-        console.warn(`[StorageRepository] Firebase Storage upload error (${storagePath}), falling back to disk:`, err);
-        this.writeLocalFile(storagePath, outputBuffer);
-      }
-    } else {
-      this.writeLocalFile(storagePath, outputBuffer);
+        },
+      });
+      console.log(`[StorageRepository] Successfully persisted image to Firebase Storage: ${storagePath}`);
+    } catch (uploadError: unknown) {
+      const msg = uploadError instanceof Error ? uploadError.message : String(uploadError);
+      console.error(`[StorageRepository] Upload failed for ${storagePath}:`, msg);
+      throw new Error(`Failed to store photograph in cloud storage: ${msg}`);
     }
 
     return {
@@ -99,37 +113,31 @@ export class StorageRepository {
   }
 
   /**
-   * Retrieves a private image buffer from Firebase Storage or local fallback.
+   * Retrieves a private image buffer from Firebase Storage.
    */
   async getImageBuffer(storagePath: string): Promise<{ buffer: Buffer; mimeType: string } | null> {
     const bucket = this.getBucket();
-    if (bucket) {
-      try {
-        const file = bucket.file(storagePath);
-        const [exists] = await file.exists();
-        if (exists) {
-          const [contents] = await file.download();
-          const [meta] = await file.getMetadata();
-          return {
-            buffer: contents,
-            mimeType: meta.contentType || 'image/jpeg',
-          };
-        }
-      } catch (err) {
-        console.warn(`[StorageRepository] Firebase Storage download error for ${storagePath}:`, err);
+    if (!bucket) {
+      console.error('[StorageRepository] Cannot get image buffer: Firebase Storage bucket is not configured.');
+      return null;
+    }
+
+    try {
+      const file = bucket.file(storagePath);
+      const [exists] = await file.exists();
+      if (!exists) {
+        return null;
       }
+      const [contents] = await file.download();
+      const [meta] = await file.getMetadata();
+      return {
+        buffer: contents,
+        mimeType: meta.contentType || 'image/jpeg',
+      };
+    } catch (err: unknown) {
+      console.error(`[StorageRepository] Firebase Storage download error for ${storagePath}:`, err);
+      return null;
     }
-
-    // Local fallback check
-    const localPath = path.join(LOCAL_STORAGE_DIR, storagePath);
-    if (fs.existsSync(localPath)) {
-      const buffer = fs.readFileSync(localPath);
-      const ext = path.extname(localPath).toLowerCase();
-      const mimeType = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
-      return { buffer, mimeType };
-    }
-
-    return null;
   }
 
   /**
@@ -137,38 +145,36 @@ export class StorageRepository {
    */
   async deleteImage(storagePath: string): Promise<boolean> {
     const bucket = this.getBucket();
-    if (bucket) {
-      try {
-        const file = bucket.file(storagePath);
-        const [exists] = await file.exists();
-        if (exists) {
-          await file.delete();
-          console.log(`[StorageRepository] Deleted from Firebase Storage: ${storagePath}`);
-        }
-      } catch (err) {
-        console.warn(`[StorageRepository] Error deleting ${storagePath} from bucket:`, err);
-      }
+    if (!bucket) {
+      console.warn(`[StorageRepository] Cannot delete ${storagePath}: Bucket not configured.`);
+      return false;
     }
 
-    const localPath = path.join(LOCAL_STORAGE_DIR, storagePath);
-    if (fs.existsSync(localPath)) {
-      try {
-        fs.unlinkSync(localPath);
-      } catch {
-        // ignore
+    try {
+      const file = bucket.file(storagePath);
+      const [exists] = await file.exists();
+      if (exists) {
+        await file.delete();
+        console.log(`[StorageRepository] Deleted private image: ${storagePath}`);
       }
+      return true;
+    } catch (err: unknown) {
+      console.error(`[StorageRepository] Failed to delete ${storagePath} from bucket:`, err);
+      return false;
     }
-
-    return true;
   }
 
-  private writeLocalFile(storagePath: string, buffer: Buffer) {
-    const fullPath = path.join(LOCAL_STORAGE_DIR, storagePath);
-    const dir = path.dirname(fullPath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
+  /**
+   * Helper to clean up any orphaned images if an assessment workflow fails midway.
+   */
+  async cleanUpOrphanedImages(storagePaths: string[]): Promise<void> {
+    for (const p of storagePaths) {
+      try {
+        await this.deleteImage(p);
+      } catch (err) {
+        console.warn(`[StorageRepository] Failed to cleanup orphaned file ${p}:`, err);
+      }
     }
-    fs.writeFileSync(fullPath, buffer);
   }
 }
 
