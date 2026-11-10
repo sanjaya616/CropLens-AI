@@ -185,7 +185,10 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ navigate }) => {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {assessments.map((asm) => {
-              const mainImg = asm.images?.[0]?.downloadUrl || 'https://images.unsplash.com/photo-1576045057995-568f588f82fb?auto=format&fit=crop&w=400&q=80';
+              const rawImgUrl = asm.images?.[0]?.downloadUrl;
+              const authenticatedImgUrl = rawImgUrl
+                ? `${rawImgUrl}${rawImgUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(token || '')}`
+                : null;
               const isPest = asm.primaryCondition.category === 'pest';
               const isHealthy = asm.primaryCondition.category === 'healthy';
 
@@ -194,15 +197,23 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ navigate }) => {
                   key={asm.assessmentId}
                   className="bg-white border border-stone-200 rounded-2xl overflow-hidden shadow-xs hover:border-emerald-500/80 transition-all flex flex-col justify-between"
                 >
-                  <div className="aspect-16/10 bg-stone-100 relative overflow-hidden">
-                    <img
-                      src={mainImg}
-                      alt={asm.primaryCondition.name}
-                      className="w-full h-full object-cover"
-                    />
+                  <div className="aspect-16/10 bg-gradient-to-br from-stone-100 to-emerald-50/50 relative overflow-hidden flex items-center justify-center">
+                    {authenticatedImgUrl ? (
+                      <img
+                        src={authenticatedImgUrl}
+                        alt={asm.primaryCondition.name}
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          // Hide broken image and fall back to icon background
+                          e.currentTarget.style.display = 'none';
+                        }}
+                      />
+                    ) : (
+                      <Sprout className="w-12 h-12 text-emerald-800/20" />
+                    )}
                     <div className="absolute top-2.5 right-2.5">
                       <span
-                        className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded backdrop-blur-xs ${
+                        className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded backdrop-blur-xs shadow-xs ${
                           isPest
                             ? 'bg-amber-900/90 text-amber-200'
                             : isHealthy

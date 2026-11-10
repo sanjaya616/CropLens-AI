@@ -25,18 +25,34 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 }
 
 export async function analyzeAssessmentApi(
-  images: Array<{ base64Data: string; mimeType: string; name?: string }>,
+  files: File[],
   fieldContext: FieldContext | undefined,
-  token: string
+  token: string,
+  consentNoticeVersion = '1.0'
 ): Promise<{ success: boolean; assessment: AssessmentRecord }> {
-  return request<{ success: boolean; assessment: AssessmentRecord }>('/api/assessments/analyze', {
+  const formData = new FormData();
+  files.forEach((file) => {
+    formData.append('images', file);
+  });
+  if (fieldContext) {
+    formData.append('fieldContext', JSON.stringify(fieldContext));
+  }
+  formData.append('consentTimestamp', new Date().toISOString());
+  formData.append('consentNoticeVersion', consentNoticeVersion);
+
+  const res = await fetch('/api/assessments/analyze', {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ images, fieldContext }),
+    body: formData,
   });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new ApiError(res.status, data.error || `Analysis request failed with status ${res.status}`);
+  }
+  return data as { success: boolean; assessment: AssessmentRecord };
 }
 
 export async function getAssessmentsApi(token: string): Promise<{ assessments: AssessmentRecord[] }> {

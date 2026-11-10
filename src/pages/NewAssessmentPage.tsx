@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { analyzeAssessmentApi } from '../services/api';
-import { ImageUpload, UploadedImageItem } from '../components/ImageUpload';
+import { ImageUpload, UploadedFileItem } from '../components/ImageUpload';
 import { PhotographGuideModal } from '../components/PhotographGuideModal';
 import { SafetyDisclaimer } from '../components/SafetyDisclaimer';
 import {
@@ -14,10 +14,7 @@ import {
   ScanLine,
   Sprout,
   HelpCircle,
-  ShieldCheck,
   AlertCircle,
-  RefreshCw,
-  ArrowRight,
   CheckCircle2,
 } from 'lucide-react';
 
@@ -28,81 +25,61 @@ interface NewAssessmentPageProps {
 export const NewAssessmentPage: React.FC<NewAssessmentPageProps> = ({ navigate }) => {
   const { user, token } = useAuth();
 
-  // Images state
-  const [images, setImages] = useState<UploadedImageItem[]>([]);
+  // Images state (real File objects)
+  const [files, setFiles] = useState<UploadedFileItem[]>([]);
   const [isGuideOpen, setIsGuideOpen] = useState(false);
 
-  // Field context state
-  const [district, setDistrict] = useState(user?.district || SRI_LANKA_TEA_DISTRICTS[0]);
+  // Field context state: starts empty / unselected per Priority 10 (no fake defaults!)
+  const [district, setDistrict] = useState(user?.district || '');
   const [plantationArea, setPlantationArea] = useState('');
-  const [plantStage, setPlantStage] = useState<PlantStage>('MATURE_BUSH');
-  const [symptomDuration, setSymptomDuration] = useState('3-5 days');
-  const [affectedArea, setAffectedArea] = useState('Scattered leaves across 10-20 bushes');
+  const [plantStage, setPlantStage] = useState<PlantStage>('UNKNOWN');
+  const [symptomDuration, setSymptomDuration] = useState('');
+  const [affectedArea, setAffectedArea] = useState('');
   const [symptomDescription, setSymptomDescription] = useState('');
-  const [weatherConditions, setWeatherConditions] = useState(WEATHER_CONDITIONS[1]); // Mist/High humidity default
+  const [weatherConditions, setWeatherConditions] = useState('');
 
-  // Consent checkbox
-  const [consentGiven, setConsentGiven] = useState(true);
+  // Consent checkbox starts FALSE by default (strictly per Priority 10)
+  const [consentGiven, setConsentGiven] = useState(false);
 
-  // Processing & Error states
+  // Processing & Error states (no fake setTimeout stages!)
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [analysisStep, setAnalysisStep] = useState<string>('Validating photograph...');
   const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
-    if (images.length === 0) {
+    if (files.length === 0) {
       setError('Please upload at least one tea leaf photograph.');
       return;
     }
 
     if (!consentGiven) {
-      setError('Please confirm consent before submitting image for AI processing.');
+      setError('You must confirm consent before submitting photographs for analysis.');
       return;
     }
 
     if (!token) {
-      setError('You must be signed in to submit an assessment.');
+      setError('Please sign in to submit a tea leaf assessment.');
+      navigate('/login');
       return;
     }
 
     setIsAnalyzing(true);
-    setAnalysisStep('Verifying image integrity & file signatures...');
 
     try {
-      // Step simulation for transparency
-      setTimeout(() => {
-        setAnalysisStep('Examining foliar symptoms with multimodal Gemini Vision...');
-      }, 900);
-
-      setTimeout(() => {
-        setAnalysisStep('Matching against Sri Lankan tea pathology taxonomy...');
-      }, 1800);
-
-      setTimeout(() => {
-        setAnalysisStep('Retrieving verified Tea Research Institute (TRI) guidance...');
-      }, 2600);
-
       const fieldContext: FieldContext = {
-        district,
+        district: district.trim() || undefined,
         plantationArea: plantationArea.trim() || undefined,
-        plantStage,
+        plantStage: plantStage !== 'UNKNOWN' ? plantStage : undefined,
         symptomDuration: symptomDuration.trim() || undefined,
         affectedArea: affectedArea.trim() || undefined,
         symptomDescription: symptomDescription.trim() || undefined,
-        weatherConditions,
+        weatherConditions: weatherConditions.trim() || undefined,
       };
 
-      const payload = images.map((img) => ({
-        base64Data: img.base64Data,
-        mimeType: img.mimeType,
-        name: img.name,
-        size: img.size,
-      }));
-
-      const res = await analyzeAssessmentApi(payload, fieldContext, token);
+      const rawFiles = files.map((f) => f.file);
+      const res = await analyzeAssessmentApi(rawFiles, fieldContext, token, '1.0');
 
       if (res.success && res.assessment) {
         navigate(`/assessment/${res.assessment.assessmentId}`);
@@ -110,14 +87,17 @@ export const NewAssessmentPage: React.FC<NewAssessmentPageProps> = ({ navigate }
         throw new Error('Analysis completed without assessment record.');
       }
     } catch (err: unknown) {
-      console.error('Analysis submission failed:', err);
-      const message = err instanceof Error ? err.message : 'Analysis failed. Please check network or API configuration.';
+      console.error('[NewAssessmentPage] Submission error:', err);
+      const message =
+        err instanceof Error
+          ? err.message
+          : 'Assessment failed. Please verify that the image files are valid and try again.';
       setError(message);
       setIsAnalyzing(false);
     }
   };
 
-  // Analysis Progress Overlay (Page 5)
+  // Truthful analysis progress screen (Priority 10)
   if (isAnalyzing) {
     return (
       <div className="max-w-xl mx-auto py-16 px-4 text-center space-y-6">
@@ -131,29 +111,29 @@ export const NewAssessmentPage: React.FC<NewAssessmentPageProps> = ({ navigate }
           </div>
 
           <div className="space-y-2">
-            <h2 className="text-xl font-bold text-stone-900">Analyzing Tea Leaf</h2>
-            <p className="text-xs text-stone-600 font-medium animate-pulse">
-              {analysisStep}
+            <h2 className="text-xl font-bold text-stone-900">Processing Leaf Photographs</h2>
+            <p className="text-xs text-stone-600">
+              Sanitizing image binary, evaluating with multimodal Gemini Vision, and matching approved TRI knowledge...
             </p>
           </div>
 
           <div className="max-w-xs mx-auto text-left bg-stone-50 p-4 rounded-xl space-y-2 text-xs text-stone-600 border border-stone-200">
             <div className="flex items-center gap-2">
               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Checking Camellia sinensis compatibility</span>
+              <span>Validating file signature & format</span>
             </div>
             <div className="flex items-center gap-2">
               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Differentiating pests from foliar diseases</span>
+              <span>Stripping EXIF location metadata</span>
             </div>
             <div className="flex items-center gap-2">
               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Grounding in TRI advisory circulars</span>
+              <span>Multimodal Gemini visual screening</span>
             </div>
           </div>
 
           <div className="text-[11px] text-stone-400">
-            Multimodal Gemini Vision Model · Sri Lankan Tea Pathology Engine
+            Model: gemini-3.8-flash · Secure server-side processing
           </div>
         </div>
       </div>
@@ -162,14 +142,14 @@ export const NewAssessmentPage: React.FC<NewAssessmentPageProps> = ({ navigate }
 
   return (
     <div className="max-w-3xl mx-auto py-8 px-4 sm:px-0 space-y-8">
-      {/* Page Title */}
+      {/* Title */}
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-stone-900 flex items-center gap-2">
           <ScanLine className="w-6 h-6 text-emerald-800" />
           <span>New Tea Leaf Assessment</span>
         </h1>
         <p className="text-xs text-stone-600 mt-1">
-          Upload 1 to 3 leaf photographs and specify optional field context to obtain preliminary multimodal AI screening and verified Tea Research Institute guidance.
+          Upload 1 to 3 real tea leaf photographs and provide optional plantation information for preliminary AI screening.
         </p>
       </div>
 
@@ -187,14 +167,14 @@ export const NewAssessmentPage: React.FC<NewAssessmentPageProps> = ({ navigate }
       )}
 
       <form onSubmit={handleSubmit} className="space-y-8">
-        {/* Step 1: Crop Specification */}
+        {/* Step 1: Crop Scope */}
         <div className="bg-white border border-stone-200 rounded-2xl p-6 shadow-xs space-y-4">
           <div className="flex items-center justify-between border-b border-stone-100 pb-3">
             <div className="flex items-center gap-2">
               <div className="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center text-xs font-bold">
                 1
               </div>
-              <h2 className="text-sm font-bold text-stone-900">Crop Specification</h2>
+              <h2 className="text-sm font-bold text-stone-900">Crop Scope</h2>
             </div>
             <span className="text-[11px] font-medium text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
               Tea Leaf Only (Version 1.0)
@@ -205,7 +185,7 @@ export const NewAssessmentPage: React.FC<NewAssessmentPageProps> = ({ navigate }
             <Sprout className="w-5 h-5 text-emerald-700 shrink-0" />
             <div className="text-stone-700">
               <span className="font-semibold text-stone-900">Camellia sinensis: </span>
-              CropLens AI specializes exclusively in tea foliage. Non-tea crops (rice, rubber, vegetables) will be safely identified as NOT_TEA.
+              CropLens AI is engineered exclusively for tea leaves. Photographs of other crops or non-plant objects will be categorized as NOT_TEA.
             </div>
           </div>
         </div>
@@ -222,7 +202,7 @@ export const NewAssessmentPage: React.FC<NewAssessmentPageProps> = ({ navigate }
             <button
               type="button"
               onClick={() => setIsGuideOpen(true)}
-              className="text-xs text-emerald-800 hover:text-emerald-950 font-medium underline flex items-center gap-1"
+              className="text-xs text-emerald-800 hover:text-emerald-950 font-medium underline flex items-center gap-1 cursor-pointer"
             >
               <HelpCircle className="w-3.5 h-3.5" />
               <span>Photograph Guide</span>
@@ -230,32 +210,33 @@ export const NewAssessmentPage: React.FC<NewAssessmentPageProps> = ({ navigate }
           </div>
 
           <ImageUpload
-            images={images}
-            onChange={setImages}
+            files={files}
+            onChange={setFiles}
             onOpenGuide={() => setIsGuideOpen(true)}
           />
         </div>
 
-        {/* Step 3: Optional Plantation & Field Information */}
+        {/* Step 3: Optional Plantation & Field Information (Starts empty per Priority 10) */}
         <div className="bg-white border border-stone-200 rounded-2xl p-6 shadow-xs space-y-4">
           <div className="flex items-center justify-between border-b border-stone-100 pb-3">
             <div className="flex items-center gap-2">
               <div className="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center text-xs font-bold">
                 3
               </div>
-              <h2 className="text-sm font-bold text-stone-900">Field & Plantation Context</h2>
+              <h2 className="text-sm font-bold text-stone-900">Optional Field Information</h2>
             </div>
-            <span className="text-[11px] text-stone-500">Optional grower information</span>
+            <span className="text-[11px] text-stone-500">Provide if known</span>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
             <div className="space-y-1">
-              <label className="font-semibold text-stone-700 block">District / Elevation Zone</label>
+              <label className="font-semibold text-stone-700 block">District / Elevation</label>
               <select
                 value={district}
                 onChange={(e) => setDistrict(e.target.value)}
                 className="w-full px-3 py-2 border border-stone-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-500/50 bg-white"
               >
+                <option value="">Not specified</option>
                 {SRI_LANKA_TEA_DISTRICTS.map((dist) => (
                   <option key={dist} value={dist}>
                     {dist}
@@ -265,12 +246,12 @@ export const NewAssessmentPage: React.FC<NewAssessmentPageProps> = ({ navigate }
             </div>
 
             <div className="space-y-1">
-              <label className="font-semibold text-stone-700 block">Estate Division / Village Area</label>
+              <label className="font-semibold text-stone-700 block">Estate Division / Village</label>
               <input
                 type="text"
                 value={plantationArea}
                 onChange={(e) => setPlantationArea(e.target.value)}
-                placeholder="e.g. St. Clair Upper Block 4"
+                placeholder="Optional estate or division name"
                 className="w-full px-3 py-2 border border-stone-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-500/50 bg-white"
               />
             </div>
@@ -291,12 +272,12 @@ export const NewAssessmentPage: React.FC<NewAssessmentPageProps> = ({ navigate }
             </div>
 
             <div className="space-y-1">
-              <label className="font-semibold text-stone-700 block">Approximate Duration of Symptoms</label>
+              <label className="font-semibold text-stone-700 block">Symptom Duration</label>
               <input
                 type="text"
                 value={symptomDuration}
                 onChange={(e) => setSymptomDuration(e.target.value)}
-                placeholder="e.g. Noticed 4 days ago"
+                placeholder="e.g. 3 days, 1 week"
                 className="w-full px-3 py-2 border border-stone-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-500/50 bg-white"
               />
             </div>
@@ -322,36 +303,37 @@ export const NewAssessmentPage: React.FC<NewAssessmentPageProps> = ({ navigate }
                 type="text"
                 value={affectedArea}
                 onChange={(e) => setAffectedArea(e.target.value)}
-                placeholder="e.g. 5 bushes in plucking row 12"
+                placeholder="Optional estimate of affected bushes"
                 className="w-full px-3 py-2 border border-stone-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-500/50 bg-white"
               />
             </div>
 
             <div className="space-y-1 sm:col-span-2">
-              <label className="font-semibold text-stone-700 block">Visible Symptoms Observed in Field</label>
+              <label className="font-semibold text-stone-700 block">Grower Symptom Notes</label>
               <textarea
                 value={symptomDescription}
                 onChange={(e) => setSymptomDescription(e.target.value)}
                 rows={2}
-                placeholder="e.g. Translucent yellowish spots on young flush turning into white blisters underneath after heavy morning mist."
+                placeholder="Describe any visible leaf spots, blisters, discoloration, or leaf curling..."
                 className="w-full px-3 py-2 border border-stone-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-500/50 bg-white"
               />
             </div>
           </div>
         </div>
 
-        {/* Step 4: Consent & Submission */}
+        {/* Step 4: Consent & Submission (Checkbox starts UNCHECKED per Priority 10) */}
         <div className="bg-white border border-stone-200 rounded-2xl p-6 shadow-xs space-y-4">
           <label className="flex items-start gap-3 cursor-pointer text-xs text-stone-700">
             <input
               type="checkbox"
               checked={consentGiven}
               onChange={(e) => setConsentGiven(e.target.checked)}
-              className="mt-0.5 rounded border-stone-300 text-emerald-800 focus:ring-emerald-500"
+              className="mt-0.5 rounded border-stone-300 text-emerald-800 focus:ring-emerald-500 cursor-pointer"
             />
             <span>
-              I confirm that the uploaded photograph(s) show tea leaves and contain no private personal identification.
-              I consent to multimodal AI screening and understand this result provides preliminary agricultural guidance, not a certified laboratory diagnosis.
+              <span className="font-semibold text-stone-900">Grower Consent & Privacy Notice (Required): </span>
+              I confirm that the uploaded photograph(s) contain only tea leaves (*Camellia sinensis*) and no personal identifying information.
+              I consent to multimodal AI screening and understand that the result provides preliminary agricultural guidance, not a certified laboratory diagnosis.
             </span>
           </label>
 
@@ -359,24 +341,24 @@ export const NewAssessmentPage: React.FC<NewAssessmentPageProps> = ({ navigate }
             <button
               type="button"
               onClick={() => navigate('/dashboard')}
-              className="w-full sm:w-auto px-5 py-2.5 border border-stone-300 rounded-xl text-xs font-semibold text-stone-700 hover:bg-stone-50"
+              className="w-full sm:w-auto px-5 py-2.5 border border-stone-300 rounded-xl text-xs font-semibold text-stone-700 hover:bg-stone-50 cursor-pointer"
             >
               Cancel
             </button>
 
             <button
               type="submit"
-              disabled={images.length === 0 || !consentGiven}
+              disabled={files.length === 0 || !consentGiven}
               className="w-full sm:w-auto bg-emerald-800 hover:bg-emerald-900 disabled:opacity-50 text-white font-bold px-8 py-3 rounded-xl text-xs shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer"
             >
               <ScanLine className="w-4 h-4 text-emerald-300" />
-              <span>Submit for AI Leaf Analysis</span>
+              <span>Submit for Real AI Screening</span>
             </button>
           </div>
         </div>
       </form>
 
-      {/* Guide Modal */}
+      {/* Photography Guide Modal */}
       <PhotographGuideModal
         isOpen={isGuideOpen}
         onClose={() => setIsGuideOpen(false)}

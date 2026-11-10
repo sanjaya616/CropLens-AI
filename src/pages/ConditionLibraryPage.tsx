@@ -162,15 +162,21 @@ export const ConditionLibraryPage: React.FC<ConditionLibraryPageProps> = ({
               key={cond.conditionId}
               className="bg-white border border-stone-200 rounded-2xl overflow-hidden shadow-xs hover:border-emerald-500/80 transition-all flex flex-col justify-between"
             >
-              <div className="aspect-16/10 bg-stone-100 relative overflow-hidden">
-                <img
-                  src={cond.exampleImageUrl || 'https://images.unsplash.com/photo-1576045057995-568f588f82fb?auto=format&fit=crop&w=600&q=80'}
-                  alt={cond.name}
-                  className="w-full h-full object-cover"
-                />
+              <div className="aspect-16/10 bg-gradient-to-br from-stone-100 to-emerald-50/50 relative overflow-hidden flex flex-col justify-between p-4 border-b border-stone-100">
+                {cond.exampleImageUrl ? (
+                  <img
+                    src={cond.exampleImageUrl}
+                    alt={cond.name}
+                    className="absolute inset-0 w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="flex items-center justify-center h-full text-emerald-800/30">
+                    {isPest ? <Bug className="w-16 h-16 text-amber-800/20" /> : <Sprout className="w-16 h-16" />}
+                  </div>
+                )}
                 <div className="absolute top-2.5 right-2.5">
                   <span
-                    className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded backdrop-blur-xs ${
+                    className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded backdrop-blur-xs shadow-xs ${
                       isPest
                         ? 'bg-amber-900/90 text-amber-200'
                         : isHealthy
@@ -179,6 +185,11 @@ export const ConditionLibraryPage: React.FC<ConditionLibraryPageProps> = ({
                     }`}
                   >
                     {isPest ? 'PEST (NOT DISEASE)' : isHealthy ? 'HEALTHY LEAF' : 'DISEASE'}
+                  </span>
+                </div>
+                <div className="absolute bottom-2.5 left-2.5">
+                  <span className="text-[10px] font-medium px-2 py-0.5 rounded bg-white/90 text-stone-700 backdrop-blur-xs border border-stone-200 shadow-xs">
+                    TRI Literature Specimen
                   </span>
                 </div>
               </div>

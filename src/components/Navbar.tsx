@@ -11,7 +11,7 @@ import {
   LogIn,
   Menu,
   X,
-  UserCheck,
+  User,
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -20,7 +20,7 @@ interface NavbarProps {
 }
 
 export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate }) => {
-  const { user, role, isAdmin, logout, switchDemoRole } = useAuth();
+  const { user, role, isAdmin, logout } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const navLinks = [
@@ -66,7 +66,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate }) => {
                 <button
                   key={link.path}
                   onClick={() => handleNav(link.path)}
-                  className={`px-3 py-2 rounded-md transition-colors flex items-center gap-1.5 ${
+                  className={`px-3 py-2 rounded-md transition-colors flex items-center gap-1.5 cursor-pointer ${
                     active
                       ? 'text-emerald-900 bg-emerald-50 font-semibold'
                       : 'hover:text-stone-900 hover:bg-stone-100'
@@ -90,55 +90,46 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate }) => {
               <span>Scan a Tea Leaf</span>
             </button>
 
-            {/* Demo Role Switcher Toggle */}
-            <div className="flex items-center border border-stone-200 rounded-md p-0.5 text-xs bg-stone-50">
-              <button
-                onClick={() => switchDemoRole('farmer')}
-                title="Switch to Farmer Role"
-                className={`px-2.5 py-1 rounded transition-colors ${
-                  role === 'farmer'
-                    ? 'bg-white text-emerald-900 font-semibold shadow-xs border border-stone-200'
-                    : 'text-stone-500 hover:text-stone-800'
-                }`}
-              >
-                Farmer
-              </button>
-              <button
-                onClick={() => switchDemoRole('admin')}
-                title="Switch to Admin Role"
-                className={`px-2.5 py-1 rounded transition-colors ${
-                  role === 'admin'
-                    ? 'bg-stone-900 text-white font-semibold shadow-xs'
-                    : 'text-stone-500 hover:text-stone-800'
-                }`}
-              >
-                TRI Admin
-              </button>
-            </div>
-
             {/* User status */}
             {user ? (
-              <div className="flex items-center gap-2 pl-2 border-l border-stone-200">
-                <div className="text-right">
-                  <div className="text-xs font-semibold text-stone-900 truncate max-w-[130px]">{user.name}</div>
-                  <div className="text-[10px] text-stone-500 uppercase tracking-wider">{role}</div>
-                </div>
+              <div className="flex items-center gap-3 pl-2 border-l border-stone-200">
+                <button
+                  onClick={() => handleNav('/profile')}
+                  className="text-right hover:opacity-80 transition-opacity cursor-pointer"
+                  title="View Profile"
+                >
+                  <div className="text-xs font-semibold text-stone-900 truncate max-w-[140px] flex items-center gap-1">
+                    <User className="w-3.5 h-3.5 text-emerald-700" />
+                    <span>{user.name}</span>
+                  </div>
+                  <div className="text-[10px] text-stone-500 uppercase tracking-wider font-semibold">
+                    {role === 'admin' ? 'TRI Administrator' : 'Tea Grower'}
+                  </div>
+                </button>
                 <button
                   onClick={logout}
                   title="Sign out"
-                  className="p-1.5 text-stone-400 hover:text-stone-600 rounded-md hover:bg-stone-100 transition-colors"
+                  className="p-1.5 text-stone-400 hover:text-stone-700 rounded-md hover:bg-stone-100 transition-colors cursor-pointer"
                 >
                   <LogOut className="w-4 h-4" />
                 </button>
               </div>
             ) : (
-              <button
-                onClick={() => handleNav('/login')}
-                className="text-stone-600 hover:text-stone-900 text-sm font-medium px-3 py-1.5 flex items-center gap-1.5"
-              >
-                <LogIn className="w-4 h-4" />
-                Sign In
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleNav('/login')}
+                  className="text-stone-700 hover:text-stone-900 text-sm font-semibold px-3 py-1.5 rounded-md hover:bg-stone-100 transition-colors flex items-center gap-1.5 cursor-pointer"
+                >
+                  <LogIn className="w-4 h-4" />
+                  <span>Sign In</span>
+                </button>
+                <button
+                  onClick={() => handleNav('/register')}
+                  className="bg-stone-900 hover:bg-stone-800 text-white text-xs font-semibold px-3.5 py-2 rounded-md transition-colors cursor-pointer"
+                >
+                  Register
+                </button>
+              </div>
             )}
           </div>
 
@@ -153,7 +144,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate }) => {
             </button>
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="p-2 text-stone-600 hover:text-stone-900 hover:bg-stone-100 rounded-md"
+              className="p-2 text-stone-600 hover:text-stone-900 hover:bg-stone-100 rounded-md cursor-pointer"
               aria-label="Toggle navigation menu"
             >
               {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
@@ -171,7 +162,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate }) => {
               <button
                 key={link.path}
                 onClick={() => handleNav(link.path)}
-                className={`w-full text-left px-3 py-2.5 rounded-md text-sm font-medium flex items-center gap-3 ${
+                className={`w-full text-left px-3 py-2.5 rounded-md text-sm font-medium flex items-center gap-3 cursor-pointer ${
                   active ? 'bg-emerald-50 text-emerald-900 font-semibold' : 'text-stone-700 hover:bg-stone-50'
                 }`}
               >
@@ -181,39 +172,32 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate }) => {
             );
           })}
 
-          <div className="pt-3 border-t border-stone-200">
-            <div className="text-xs text-stone-500 mb-2 font-medium">Demo Role Mode:</div>
-            <div className="flex gap-2">
-              <button
-                onClick={() => switchDemoRole('farmer')}
-                className={`flex-1 py-1.5 text-xs rounded border text-center ${
-                  role === 'farmer' ? 'bg-emerald-50 border-emerald-300 font-semibold text-emerald-900' : 'border-stone-200'
-                }`}
-              >
-                Farmer
-              </button>
-              <button
-                onClick={() => switchDemoRole('admin')}
-                className={`flex-1 py-1.5 text-xs rounded border text-center ${
-                  role === 'admin' ? 'bg-stone-900 text-white font-semibold' : 'border-stone-200'
-                }`}
-              >
-                TRI Admin
-              </button>
-            </div>
-          </div>
-
-          {user && (
+          {user ? (
             <div className="pt-3 border-t border-stone-200 flex items-center justify-between text-sm">
-              <div>
+              <button onClick={() => handleNav('/profile')} className="text-left cursor-pointer">
                 <div className="font-semibold text-stone-900">{user.name}</div>
-                <div className="text-xs text-stone-500">{user.email}</div>
-              </div>
+                <div className="text-xs text-stone-500">{user.email} · {role}</div>
+              </button>
               <button
                 onClick={logout}
-                className="text-stone-500 hover:text-stone-900 text-xs px-2.5 py-1.5 border border-stone-200 rounded"
+                className="text-stone-500 hover:text-stone-900 text-xs px-2.5 py-1.5 border border-stone-200 rounded cursor-pointer"
               >
                 Sign out
+              </button>
+            </div>
+          ) : (
+            <div className="pt-3 border-t border-stone-200 flex gap-2">
+              <button
+                onClick={() => handleNav('/login')}
+                className="flex-1 py-2 text-xs font-semibold border border-stone-200 rounded-md text-stone-800"
+              >
+                Sign In
+              </button>
+              <button
+                onClick={() => handleNav('/register')}
+                className="flex-1 py-2 text-xs font-semibold bg-emerald-800 text-white rounded-md"
+              >
+                Register
               </button>
             </div>
           )}

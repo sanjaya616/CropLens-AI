@@ -20,10 +20,7 @@ service firebase.storage {
     // Public condition reference images (admin only write)
     match /conditions/{fileName} {
       allow read: if true;
-      allow write: if isAuthenticated() && (
-        request.auth.token.admin == true ||
-        request.auth.token.email in ['sanjayalasnan327@gmail.com', 'admin@croplens.lk']
-      );
+      allow write: if isAuthenticated() && request.auth.token.admin == true;
     }
   }
 }

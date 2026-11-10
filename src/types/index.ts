@@ -92,6 +92,8 @@ export interface GeminiAnalysisResponse {
   disclaimer: string;
 }
 
+export type GuidanceReviewStatus = 'draft' | 'pending_review' | 'approved' | 'archived';
+
 export interface VerifiedGuidance {
   conditionId: ConditionId;
   name: string;
@@ -105,7 +107,9 @@ export interface VerifiedGuidance {
   officialSourceUrl: string;
   publicationDate?: string;
   lastReviewed: string;
-  reviewStatus: 'approved' | 'pending_review' | 'archived';
+  reviewerUid?: string;
+  reviewNotes?: string;
+  reviewStatus: GuidanceReviewStatus;
   exampleImageUrl?: string;
 }
 
@@ -143,6 +147,8 @@ export interface AssessmentRecord {
   guidance?: VerifiedGuidance;
   guidanceIds: string[];
   disclaimer: string;
+  consentTimestamp?: string;
+  consentNoticeVersion?: string;
   images: AssessmentImage[];
   createdAt: string;
   updatedAt: string;
@@ -165,7 +171,18 @@ export interface DatasetSample {
   commonName: string;
   category: ConditionCategory;
   scientificName: string;
-  imageUrl: string;
+  imageUrl?: string;
   sourceDataset: string;
   description: string;
+}
+
+export interface EvaluationRecord {
+  sampleImageId: string;
+  groundTruthLabel: SupportedConditionId;
+  datasetVersion: string;
+  originalOrAugmented: 'original' | 'augmented';
+  modelId: string;
+  prediction: ConditionId;
+  matchResult: boolean;
+  evaluatedAt: string;
 }

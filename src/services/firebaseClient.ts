@@ -1,6 +1,6 @@
 /**
  * CropLens AI - Client Firebase Service
- * Handles Firebase Auth & Firestore client connection with graceful local adapter fallback.
+ * Direct client Firebase Authentication & Cloud Firestore connection.
  */
 
 import { initializeApp, getApps, FirebaseApp } from 'firebase/app';
@@ -10,18 +10,19 @@ import {
   signInWithPopup,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  sendPasswordResetEmail,
+  sendEmailVerification,
   signOut,
-  User as FirebaseUser,
   Auth,
 } from 'firebase/auth';
 
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || '',
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || '',
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || '',
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || '',
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '',
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || '',
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyAgp5tuTtkiGOak2_4uBQvEmvDbNJDmQQU",
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "croplens-ai.firebaseapp.com",
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "croplens-ai",
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "croplens-ai.firebasestorage.app",
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "407527902882",
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:407527902882:web:f56b7bd2f8181f6ca951fb",
 };
 
 export const isFirebaseConfigured = Boolean(
@@ -39,57 +40,53 @@ if (isFirebaseConfigured) {
     app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
     auth = getAuth(app);
   } catch (err) {
-    console.warn('Firebase initialization error, using local fallback:', err);
+    console.warn('[Firebase Client] Initialization notice:', err);
   }
 }
 
 export { auth, googleProvider };
 
 export async function signInWithGoogleClient() {
-  if (auth) {
-    return signInWithPopup(auth, googleProvider);
+  if (!auth) {
+    throw new Error(
+      'Firebase Authentication is not configured. Please configure VITE_FIREBASE_API_KEY and VITE_FIREBASE_PROJECT_ID in your environment.'
+    );
   }
-  // Local fallback mock user for immediate zero-config demo experience
-  return {
-    user: {
-      uid: 'user-farmer-01',
-      displayName: 'Sunil Wickramasinghe',
-      email: 'farmer.sunil@croplens.lk',
-      getIdToken: async () => 'demo-token-user-farmer-01',
-    },
-  };
+  return signInWithPopup(auth, googleProvider);
 }
 
 export async function signInWithEmailClient(email: string, pass: string) {
-  if (auth) {
-    return signInWithEmailAndPassword(auth, email, pass);
+  if (!auth) {
+    throw new Error(
+      'Firebase Authentication is not configured. Please configure VITE_FIREBASE_API_KEY and VITE_FIREBASE_PROJECT_ID in your environment.'
+    );
   }
-  // Local fallback demo authentication
-  const isAdmin = email.toLowerCase().includes('admin') || email.toLowerCase() === 'sanjayalasnan327@gmail.com';
-  const uid = isAdmin ? 'user-admin-01' : `user-${email.replace(/[^a-zA-Z0-9]/g, '').slice(0, 10)}`;
-  return {
-    user: {
-      uid,
-      displayName: isAdmin ? 'Sanjaya Lasnan (TRI Admin)' : email.split('@')[0],
-      email,
-      getIdToken: async () => `demo-token-${uid}`,
-    },
-  };
+  return signInWithEmailAndPassword(auth, email, pass);
 }
 
-export async function registerWithEmailClient(email: string, pass: string, displayName?: string) {
-  if (auth) {
-    return createUserWithEmailAndPassword(auth, email, pass);
+export async function registerWithEmailClient(email: string, pass: string) {
+  if (!auth) {
+    throw new Error(
+      'Firebase Authentication is not configured. Please configure VITE_FIREBASE_API_KEY and VITE_FIREBASE_PROJECT_ID in your environment.'
+    );
   }
-  const uid = `user-${Date.now()}`;
-  return {
-    user: {
-      uid,
-      displayName: displayName || email.split('@')[0],
-      email,
-      getIdToken: async () => `demo-token-${uid}`,
-    },
-  };
+  const userCredential = await createUserWithEmailAndPassword(auth, email, pass);
+  // Send email verification if supported
+  try {
+    await sendEmailVerification(userCredential.user);
+  } catch (err) {
+    console.warn('[Firebase Client] Notice sending verification email:', err);
+  }
+  return userCredential;
+}
+
+export async function resetPasswordClient(email: string) {
+  if (!auth) {
+    throw new Error(
+      'Firebase Authentication is not configured. Please configure VITE_FIREBASE_API_KEY and VITE_FIREBASE_PROJECT_ID in your environment.'
+    );
+  }
+  return sendPasswordResetEmail(auth, email);
 }
 
 export async function signOutClient() {

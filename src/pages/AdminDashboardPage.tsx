@@ -344,13 +344,14 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({ navigate
                   onChange={(e) =>
                     setEditingCondition({
                       ...editingCondition,
-                      reviewStatus: e.target.value as 'approved' | 'pending_review' | 'archived',
+                      reviewStatus: e.target.value as 'approved' | 'pending_review' | 'draft' | 'archived',
                     })
                   }
                   className="w-full px-3 py-2 border border-stone-300 rounded-xl bg-white"
                 >
-                  <option value="approved">Approved & Published</option>
-                  <option value="pending_review">Requires Review</option>
+                  <option value="approved">Approved & Published (Visible to Growers)</option>
+                  <option value="pending_review">Pending TRI Review (Hidden from Growers)</option>
+                  <option value="draft">Draft (In Preparation)</option>
                   <option value="archived">Archived</option>
                 </select>
               </div>

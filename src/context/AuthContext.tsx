@@ -2,9 +2,11 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { UserProfile, UserRole } from '../types';
 import {
   auth,
+  isFirebaseConfigured,
   signInWithGoogleClient,
   signInWithEmailClient,
   registerWithEmailClient,
+  resetPasswordClient,
   signOutClient,
 } from '../services/firebaseClient';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
@@ -15,87 +17,65 @@ interface AuthContextType {
   role: UserRole;
   isLoading: boolean;
   isAdmin: boolean;
+  isFirebaseReady: boolean;
   loginWithGoogle: () => Promise<void>;
   loginWithEmail: (email: string, pass: string) => Promise<void>;
   registerWithEmail: (email: string, pass: string, name: string, district?: string) => Promise<void>;
+  resetPassword: (email: string) => Promise<void>;
   logout: () => Promise<void>;
-  switchDemoRole: (role: UserRole) => void;
   updateProfile: (data: Partial<UserProfile>) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const DEMO_FARMER: UserProfile = {
-  uid: 'user-farmer-01',
-  name: 'Sunil Wickramasinghe',
-  email: 'farmer.sunil@croplens.lk',
-  role: 'farmer',
-  preferredLanguage: 'en',
-  district: 'Nuwara Eliya (Up-Country High Grown)',
-  createdAt: '2025-01-10T08:00:00.000Z',
-};
-
-const DEMO_ADMIN: UserProfile = {
-  uid: 'user-admin-01',
-  name: 'Sanjaya Lasnan (TRI Admin)',
-  email: 'sanjayalasnan327@gmail.com',
-  role: 'admin',
-  preferredLanguage: 'en',
-  district: 'Kandy (Mid-Country)',
-  createdAt: '2025-01-01T08:00:00.000Z',
-};
-
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<UserProfile | null>(() => {
-    const saved = localStorage.getItem('croplens_user');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch {
-        return DEMO_FARMER;
-      }
-    }
-    return DEMO_FARMER;
-  });
+  // Application starts with NO authenticated user by default (strictly per Priority 1)
+  const [user, setUser] = useState<UserProfile | null>(null);
+  const [token, setToken] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
 
-  const [token, setToken] = useState<string | null>(() => {
-    return localStorage.getItem('croplens_token') || 'demo-token-user-farmer-01';
-  });
-
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-
+  // Synchronize authenticated session from Firebase Auth
   useEffect(() => {
-    if (user) {
-      localStorage.setItem('croplens_user', JSON.stringify(user));
-    } else {
-      localStorage.removeItem('croplens_user');
+    if (!auth) {
+      setIsLoading(false);
+      return;
     }
-    if (token) {
-      localStorage.setItem('croplens_token', token);
-    } else {
-      localStorage.removeItem('croplens_token');
-    }
-  }, [user, token]);
-
-  // Listen to Firebase auth changes if auth is initialized
-  useEffect(() => {
-    if (!auth) return;
 
     const unsubscribe = onAuthStateChanged(auth, async (fbUser: FirebaseUser | null) => {
       if (fbUser) {
-        const idToken = await fbUser.getIdToken();
-        const isAdmin = fbUser.email === 'sanjayalasnan327@gmail.com' || fbUser.email?.includes('admin');
-        const profile: UserProfile = {
-          uid: fbUser.uid,
-          name: fbUser.displayName || fbUser.email?.split('@')[0] || 'Tea Grower',
-          email: fbUser.email || `${fbUser.uid}@croplens.lk`,
-          role: isAdmin ? 'admin' : 'farmer',
-          preferredLanguage: 'en',
-          createdAt: new Date().toISOString(),
-        };
-        setUser(profile);
-        setToken(idToken);
+        try {
+          const idToken = await fbUser.getIdToken();
+          setToken(idToken);
+
+          // Fetch server-verified profile and role from backend
+          const res = await fetch('/api/auth/me', {
+            headers: { Authorization: `Bearer ${idToken}` },
+          });
+
+          if (res.ok) {
+            const data = await res.json();
+            setUser(data.user);
+          } else {
+            // Fallback basic profile until server responds
+            setUser({
+              uid: fbUser.uid,
+              name: fbUser.displayName || fbUser.email?.split('@')[0] || 'Tea Grower',
+              email: fbUser.email || `${fbUser.uid}@croplens.lk`,
+              role: 'farmer',
+              preferredLanguage: 'en',
+              createdAt: new Date().toISOString(),
+            });
+          }
+        } catch (err) {
+          console.error('[AuthContext] Failed to retrieve user session profile:', err);
+          setUser(null);
+          setToken(null);
+        }
+      } else {
+        setUser(null);
+        setToken(null);
       }
+      setIsLoading(false);
     });
 
     return () => unsubscribe();
@@ -106,23 +86,17 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     try {
       const res = await signInWithGoogleClient();
       const idToken = await res.user.getIdToken();
-      const isAdmin =
-        res.user.email?.toLowerCase() === 'sanjayalasnan327@gmail.com' ||
-        res.user.email?.toLowerCase().includes('admin');
-
-      const profile: UserProfile = {
-        uid: res.user.uid,
-        name: res.user.displayName || res.user.email?.split('@')[0] || 'Tea Grower',
-        email: res.user.email || `${res.user.uid}@croplens.lk`,
-        role: isAdmin ? 'admin' : 'farmer',
-        preferredLanguage: 'en',
-        createdAt: new Date().toISOString(),
-      };
-
-      setUser(profile);
       setToken(idToken);
+
+      const profileRes = await fetch('/api/auth/me', {
+        headers: { Authorization: `Bearer ${idToken}` },
+      });
+      if (profileRes.ok) {
+        const data = await profileRes.json();
+        setUser(data.user);
+      }
     } catch (err) {
-      console.error('Google Sign In failed:', err);
+      console.error('[AuthContext] Google sign in failed:', err);
       throw err;
     } finally {
       setIsLoading(false);
@@ -134,23 +108,17 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     try {
       const res = await signInWithEmailClient(email, pass);
       const idToken = await res.user.getIdToken();
-      const isAdmin =
-        res.user.email?.toLowerCase() === 'sanjayalasnan327@gmail.com' ||
-        res.user.email?.toLowerCase().includes('admin');
-
-      const profile: UserProfile = {
-        uid: res.user.uid,
-        name: res.user.displayName || res.user.email?.split('@')[0] || 'Tea Grower',
-        email: res.user.email || `${res.user.uid}@croplens.lk`,
-        role: isAdmin ? 'admin' : 'farmer',
-        preferredLanguage: 'en',
-        createdAt: new Date().toISOString(),
-      };
-
-      setUser(profile);
       setToken(idToken);
+
+      const profileRes = await fetch('/api/auth/me', {
+        headers: { Authorization: `Bearer ${idToken}` },
+      });
+      if (profileRes.ok) {
+        const data = await profileRes.json();
+        setUser(data.user);
+      }
     } catch (err) {
-      console.error('Email sign in failed:', err);
+      console.error('[AuthContext] Email sign in failed:', err);
       throw err;
     } finally {
       setIsLoading(false);
@@ -160,29 +128,34 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const registerWithEmail = async (email: string, pass: string, name: string, district?: string) => {
     setIsLoading(true);
     try {
-      const res = await registerWithEmailClient(email, pass, name);
+      const res = await registerWithEmailClient(email, pass);
       const idToken = await res.user.getIdToken();
-      const isAdmin =
-        email.toLowerCase() === 'sanjayalasnan327@gmail.com' || email.toLowerCase().includes('admin');
-
-      const profile: UserProfile = {
-        uid: res.user.uid,
-        name: name || res.user.displayName || email.split('@')[0],
-        email: res.user.email || email,
-        role: isAdmin ? 'admin' : 'farmer',
-        preferredLanguage: 'en',
-        district,
-        createdAt: new Date().toISOString(),
-      };
-
-      setUser(profile);
       setToken(idToken);
+
+      // Persist profile with name and district via backend
+      const profileRes = await fetch('/api/auth/profile', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({ name, district, preferredLanguage: 'en' }),
+      });
+
+      if (profileRes.ok) {
+        const data = await profileRes.json();
+        setUser(data.user);
+      }
     } catch (err) {
-      console.error('Registration failed:', err);
+      console.error('[AuthContext] Registration failed:', err);
       throw err;
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const resetPassword = async (email: string) => {
+    await resetPasswordClient(email);
   };
 
   const logout = async () => {
@@ -191,22 +164,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setToken(null);
   };
 
-  const switchDemoRole = (targetRole: UserRole) => {
-    if (targetRole === 'admin') {
-      setUser(DEMO_ADMIN);
-      setToken('demo-token-user-admin-01');
-    } else {
-      setUser(DEMO_FARMER);
-      setToken('demo-token-user-farmer-01');
-    }
-  };
-
   const updateProfile = async (data: Partial<UserProfile>) => {
-    if (!user) return;
-    const updated = { ...user, ...data };
-    setUser(updated);
+    if (!token || !user) return;
     try {
-      await fetch('/api/auth/profile', {
+      const res = await fetch('/api/auth/profile', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -214,8 +175,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         },
         body: JSON.stringify(data),
       });
+      if (res.ok) {
+        const resData = await res.json();
+        setUser(resData.user);
+      }
     } catch (err) {
-      console.warn('Profile sync failed:', err);
+      console.error('[AuthContext] Update profile error:', err);
+      throw err;
     }
   };
 
@@ -230,11 +196,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         role,
         isLoading,
         isAdmin,
+        isFirebaseReady: isFirebaseConfigured,
         loginWithGoogle,
         loginWithEmail,
         registerWithEmail,
+        resetPassword,
         logout,
-        switchDemoRole,
         updateProfile,
       }}
     >

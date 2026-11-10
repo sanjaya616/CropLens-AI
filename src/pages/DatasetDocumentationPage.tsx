@@ -9,6 +9,7 @@ import {
   ScanLine,
   Layers,
   Sparkles,
+  Sprout,
 } from 'lucide-react';
 
 interface DatasetDocumentationPageProps {
@@ -166,17 +167,45 @@ export const DatasetDocumentationPage: React.FC<DatasetDocumentationPageProps> =
           {DATASET_EVALUATION_SAMPLES.map((sample) => (
             <div
               key={sample.id}
-              className="bg-white rounded-2xl border border-stone-200 overflow-hidden shadow-xs flex flex-col justify-between"
+              className="bg-white rounded-2xl border border-stone-200 overflow-hidden shadow-xs flex flex-col justify-between hover:border-emerald-500/80 transition-all"
             >
-              <div className="aspect-16/10 bg-stone-100 relative">
-                <img
-                  src={sample.imageUrl}
-                  alt={sample.commonName}
-                  className="w-full h-full object-cover"
-                />
-                <span className="absolute bottom-2 left-2 bg-stone-900/80 text-white text-[10px] px-2 py-0.5 rounded font-medium backdrop-blur-xs">
-                  Ground Truth: {sample.groundTruthLabel}
-                </span>
+              <div className="aspect-16/10 bg-gradient-to-br from-stone-100 to-emerald-50/50 relative p-4 flex flex-col justify-between border-b border-stone-100">
+                {sample.imageUrl ? (
+                  <img
+                    src={sample.imageUrl}
+                    alt={sample.commonName}
+                    className="absolute inset-0 w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="flex items-center justify-center h-full text-emerald-800/25">
+                    {sample.category === 'pest' ? (
+                      <span className="text-3xl">🕷️</span>
+                    ) : (
+                      <Sprout className="w-12 h-12" />
+                    )}
+                  </div>
+                )}
+                <div className="flex items-center justify-between z-10">
+                  <span
+                    className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded shadow-xs ${
+                      sample.category === 'pest'
+                        ? 'bg-amber-900 text-amber-200'
+                        : sample.category === 'healthy'
+                        ? 'bg-emerald-900 text-emerald-200'
+                        : 'bg-stone-900 text-stone-200'
+                    }`}
+                  >
+                    {sample.category === 'pest' ? 'Pest (Arachnid)' : sample.category === 'healthy' ? 'Healthy Foliage' : 'Pathology'}
+                  </span>
+                  <span className="text-[10px] font-mono font-semibold bg-white/90 text-stone-700 px-2 py-0.5 rounded border border-stone-200">
+                    {sample.id}
+                  </span>
+                </div>
+                <div className="z-10">
+                  <span className="inline-block bg-stone-900/85 text-white text-[10px] px-2 py-0.5 rounded font-medium backdrop-blur-xs">
+                    Ground Truth: {sample.groundTruthLabel}
+                  </span>
+                </div>
               </div>
               <div className="p-4 space-y-3 grow flex flex-col justify-between">
                 <div>

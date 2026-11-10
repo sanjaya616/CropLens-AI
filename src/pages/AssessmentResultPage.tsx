@@ -22,6 +22,7 @@ import {
   Star,
   Send,
   Sparkles,
+  Sprout,
 } from 'lucide-react';
 
 interface AssessmentResultPageProps {
@@ -185,11 +186,17 @@ export const AssessmentResultPage: React.FC<AssessmentResultPageProps> = ({
             {/* Primary Photograph */}
             <div className="md:col-span-5 space-y-2">
               <div className="aspect-4/3 rounded-2xl overflow-hidden bg-stone-100 border border-stone-200 relative">
-                <img
-                  src={assessment.images?.[0]?.downloadUrl}
-                  alt={primary.name}
-                  className="w-full h-full object-cover"
-                />
+                {assessment.images?.[0]?.downloadUrl ? (
+                  <img
+                    src={`${assessment.images[0].downloadUrl}${assessment.images[0].downloadUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(token || '')}`}
+                    alt={primary.name}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-stone-400">
+                    <Sprout className="w-12 h-12" />
+                  </div>
+                )}
                 <div className="absolute top-2.5 left-2.5">
                   <span
                     className={`text-[10px] uppercase font-bold tracking-wider px-2.5 py-1 rounded-md backdrop-blur-md shadow-xs ${
@@ -213,7 +220,7 @@ export const AssessmentResultPage: React.FC<AssessmentResultPageProps> = ({
                       className="aspect-4/3 rounded-xl overflow-hidden bg-stone-100 border border-stone-200"
                     >
                       <img
-                        src={img.downloadUrl}
+                        src={`${img.downloadUrl}${img.downloadUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(token || '')}`}
                         alt={`Additional view ${i + 2}`}
                         className="w-full h-full object-cover"
                       />

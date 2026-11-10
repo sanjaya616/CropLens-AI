@@ -10,6 +10,8 @@ import { AssessmentResultPage } from './pages/AssessmentResultPage';
 import { ConditionLibraryPage } from './pages/ConditionLibraryPage';
 import { AdminDashboardPage } from './pages/AdminDashboardPage';
 import { DatasetDocumentationPage } from './pages/DatasetDocumentationPage';
+import { ProfilePage } from './pages/ProfilePage';
+import { PrivacyPage } from './pages/PrivacyPage';
 
 function AppContent() {
   const [currentPath, setCurrentPath] = useState<string>(() => {
@@ -49,12 +51,25 @@ function AppContent() {
       return <DashboardPage navigate={navigate} />;
     }
 
+    // Profile
+    if (currentPath === '/profile') {
+      return <ProfilePage navigate={navigate} />;
+    }
+
+    // Privacy & Data Governance
+    if (currentPath === '/privacy') {
+      return <PrivacyPage navigate={navigate} />;
+    }
+
     // Auth routes
     if (currentPath === '/login') {
       return <AuthPage navigate={navigate} initialMode="login" />;
     }
     if (currentPath === '/register') {
       return <AuthPage navigate={navigate} initialMode="register" />;
+    }
+    if (currentPath === '/forgot-password') {
+      return <AuthPage navigate={navigate} initialMode="forgot" />;
     }
 
     // Condition library

@@ -1,8 +1,15 @@
 import express, { Request, Response, NextFunction } from 'express';
 import dotenv from 'dotenv';
 import path from 'path';
+import multer from 'multer';
 import { fileURLToPath } from 'url';
-import { db } from './server/db';
+import { getFirebaseAdmin } from './server/firebase/admin';
+import { userRepository } from './server/repositories/userRepository';
+import { assessmentRepository } from './server/repositories/assessmentRepository';
+import { conditionRepository } from './server/repositories/conditionRepository';
+import { feedbackRepository } from './server/repositories/feedbackRepository';
+import { storageRepository } from './server/repositories/storageRepository';
+import { requireAuth, requireAdmin, AuthenticatedRequest } from './server/middleware/auth';
 import { analyzeTeaLeafWithGemini, ImageInput } from './src/services/geminiService';
 import { validateImageSignature, validateImageFile } from './src/utils/validation';
 import {
@@ -12,8 +19,9 @@ import {
   VerifiedGuidance,
   ConditionId,
   UserProfile,
+  AssessmentImage,
 } from './src/types';
-import { DATASET_EVALUATION_SAMPLES, VERIFIED_CONDITIONS_CATALOG } from './src/constants/conditions';
+import { DATASET_EVALUATION_SAMPLES, HAS_LOCAL_DATASET_IMAGES } from './src/constants/conditions';
 
 dotenv.config();
 
@@ -24,250 +32,227 @@ const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const isProduction = process.env.NODE_ENV === 'production';
 
-// Increase body parser limit to support base64 tea leaf images up to 15MB
-app.use(express.json({ limit: '15mb' }));
-app.use(express.urlencoded({ extended: true, limit: '15mb' }));
+// Initialize Firebase Admin SDK
+getFirebaseAdmin();
 
-// Configured admin emails
-const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || 'sanjayalasnan327@gmail.com,admin@croplens.lk')
-  .split(',')
-  .map((e) => e.trim().toLowerCase());
+// Middleware: JSON and URL-encoded parsers with sensible limits
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 
-// Authenticated user request extension
-export interface AuthenticatedRequest extends Request {
-  user?: UserProfile;
-}
-
-// Authentication middleware
-// Extracts and verifies Bearer token (supports Firebase ID token or verified session token)
-export function requireAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Authentication required. Missing or invalid Bearer token.' });
-  }
-
-  const token = authHeader.split('Bearer ')[1].trim();
-  if (!token) {
-    return res.status(401).json({ error: 'Invalid authentication token.' });
-  }
-
-  // Parse token: check if user exists in db or decode payload
-  let uid = token.startsWith('demo-token-') ? token.replace('demo-token-', '') : token;
-  let email = '';
-  let name = 'Tea Grower';
-
-  try {
-    if (token.startsWith('{')) {
-      const parsed = JSON.parse(token);
-      uid = parsed.uid || uid;
-      email = parsed.email || '';
-      name = parsed.name || name;
-    } else if (token.includes('.')) {
-      // JWT token format: decode payload safely
-      const payloadBase64 = token.split('.')[1];
-      const decodedJson = Buffer.from(payloadBase64, 'base64').toString('utf8');
-      const payload = JSON.parse(decodedJson);
-      uid = payload.user_id || payload.sub || payload.uid || uid;
-      email = payload.email || '';
-      name = payload.name || name;
-    }
-  } catch {
-    // If not json, use token as uid directly
-  }
-
-  let user = db.getUser(uid);
-  if (!user && email) {
-    user = db.getUserByEmail(email);
-  }
-
-  if (!user) {
-    // Determine role: verified admin emails get admin role
-    const isAdmin = email && ADMIN_EMAILS.includes(email.toLowerCase());
-    user = {
-      uid,
-      name,
-      email: email || `${uid}@croplens.local`,
-      role: isAdmin ? 'admin' : 'farmer',
-      preferredLanguage: 'en',
-      createdAt: new Date().toISOString(),
-    };
-    db.upsertUser(user);
-  }
-
-  req.user = user;
+// Security Headers
+app.use((_req: Request, res: Response, next: NextFunction) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
   next();
-}
+});
 
-// Admin authorization middleware
-export function requireAdmin(req: AuthenticatedRequest, res: Response, next: NextFunction) {
-  if (!req.user) {
-    return res.status(401).json({ error: 'Authentication required' });
-  }
-
-  const isAdmin =
-    req.user.role === 'admin' ||
-    (req.user.email && ADMIN_EMAILS.includes(req.user.email.toLowerCase()));
-
-  if (!isAdmin) {
-    return res.status(403).json({ error: 'Access denied. Administrator privileges required.' });
-  }
-
-  next();
-}
+// Configure Multer for multipart memory storage (Max 3 files, 5MB each)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5 MB
+    files: 3,
+  },
+});
 
 // ==========================================
 // API ROUTES
 // ==========================================
 
-// Current user profile
+// Health Check Endpoint
+app.get('/api/health', (_req: Request, res: Response) => {
+  const { isLive } = getFirebaseAdmin();
+  res.json({
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    firebaseAdminLive: isLive,
+    geminiConfigured: Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'MY_GEMINI_API_KEY'),
+    environment: process.env.NODE_ENV || 'development',
+  });
+});
+
+// Current User Profile
 app.get('/api/auth/me', requireAuth, (req: AuthenticatedRequest, res: Response) => {
   res.json({ user: req.user });
 });
 
-// Update user profile
-app.put('/api/auth/profile', requireAuth, (req: AuthenticatedRequest, res: Response) => {
-  const { name, preferredLanguage, district } = req.body;
+// Update Profile
+app.put('/api/auth/profile', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
 
+  const { name, preferredLanguage, district } = req.body;
   const updated: UserProfile = {
     ...req.user,
     name: typeof name === 'string' && name.trim() ? name.trim() : req.user.name,
-    preferredLanguage: preferredLanguage === 'si' || preferredLanguage === 'ta' ? preferredLanguage : 'en',
-    district: typeof district === 'string' ? district : req.user.district,
+    preferredLanguage:
+      preferredLanguage === 'si' || preferredLanguage === 'ta' ? preferredLanguage : 'en',
+    district: typeof district === 'string' ? district.trim() : req.user.district,
   };
 
-  db.upsertUser(updated);
+  await userRepository.upsertUser(updated);
   res.json({ user: updated });
 });
 
-// 1. Analyze Tea Leaf Photograph(s)
-app.post('/api/assessments/analyze', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const { images, fieldContext } = req.body as {
-      images: Array<{ base64Data: string; mimeType: string; name?: string; size?: number }>;
-      fieldContext?: FieldContext;
-    };
+// ==========================================
+// ASSESSMENTS API
+// ==========================================
 
-    if (!images || !Array.isArray(images) || images.length === 0) {
-      return res.status(400).json({ error: 'Please upload at least one tea leaf photograph.' });
-    }
-
-    if (images.length > 3) {
-      return res.status(400).json({ error: 'Maximum 3 photographs allowed per assessment.' });
-    }
-
-    const validatedImages: ImageInput[] = [];
-    const assessmentImages = [];
-
-    for (let i = 0; i < images.length; i++) {
-      const img = images[i];
-      if (!img.base64Data) {
-        return res.status(400).json({ error: `Image ${i + 1} has empty data.` });
+/**
+ * POST /api/assessments/analyze
+ * Accepts multipart/form-data with up to 3 tea leaf image files.
+ * Strips EXIF metadata via Sharp, stores in private Firebase Storage,
+ * runs real multimodal Gemini Vision analysis, and stores Firestore record.
+ */
+app.post(
+  '/api/assessments/analyze',
+  requireAuth,
+  upload.array('images', 3),
+  async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const files = req.files as Express.Multer.File[];
+      if (!files || files.length === 0) {
+        return res.status(400).json({ error: 'Please upload at least one tea leaf photograph.' });
       }
 
-      // Clean base64 header if present
-      let cleanBase64 = img.base64Data;
-      let mimeType = img.mimeType || 'image/jpeg';
-
-      if (cleanBase64.includes(';base64,')) {
-        const parts = cleanBase64.split(';base64,');
-        mimeType = parts[0].replace('data:', '');
-        cleanBase64 = parts[1];
+      if (files.length > 3) {
+        return res.status(400).json({ error: 'Maximum 3 photographs allowed per assessment.' });
       }
 
-      const buffer = Buffer.from(cleanBase64, 'base64');
+      // Parse optional field context
+      let fieldContext: FieldContext | undefined;
+      if (req.body.fieldContext) {
+        try {
+          fieldContext =
+            typeof req.body.fieldContext === 'string'
+              ? JSON.parse(req.body.fieldContext)
+              : req.body.fieldContext;
+        } catch {
+          // Ignore parse errors, leave undefined
+        }
+      }
 
-      // Size validation
-      const sizeValidation = validateImageFile({
-        size: buffer.length,
-        type: mimeType,
-        name: img.name || `tea-leaf-${i + 1}.jpg`,
+      const assessmentId = `asm-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+      const validatedGeminiImages: ImageInput[] = [];
+      const assessmentImages: AssessmentImage[] = [];
+
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+
+        // 1. File size check
+        const sizeValidation = validateImageFile({
+          size: file.size,
+          type: file.mimetype,
+          name: file.originalname,
+        });
+        if (!sizeValidation.valid) {
+          return res.status(400).json({ error: `Image ${i + 1}: ${sizeValidation.error}` });
+        }
+
+        // 2. Binary signature / magic byte check
+        const signature = validateImageSignature(file.buffer);
+        if (!signature.valid) {
+          return res.status(400).json({ error: `Image ${i + 1}: ${signature.error}` });
+        }
+
+        // 3. Process, sanitize, and strip EXIF using Sharp via storageRepository
+        const imageId = `img-${assessmentId}-${i + 1}`;
+        const stored = await storageRepository.uploadAssessmentImage(
+          req.user!.uid,
+          assessmentId,
+          `leaf-image-0${i + 1}${path.extname(file.originalname) || '.jpg'}`,
+          file.buffer,
+          signature.mimeType || file.mimetype
+        );
+
+        // Prepare image for Gemini Vision analysis
+        validatedGeminiImages.push({
+          base64Data: stored.sanitizedBuffer.toString('base64'),
+          mimeType: stored.mimeType,
+        });
+
+        // Protected streaming endpoint for browser retrieval
+        const streamUrl = `/api/assessments/${assessmentId}/images/${imageId}`;
+
+        assessmentImages.push({
+          imageId,
+          storagePath: stored.storagePath,
+          downloadUrl: streamUrl,
+          mimeType: stored.mimeType,
+          fileSize: stored.fileSize,
+          width: stored.width,
+          height: stored.height,
+          uploadedAt: new Date().toISOString(),
+        });
+      }
+
+      // 4. Multimodal Gemini Vision Image Analysis
+      const aiResult = await analyzeTeaLeafWithGemini(validatedGeminiImages, fieldContext);
+
+      // 5. Retrieve verified guidance (Priority 6: only APPROVED guidance displayed as verified)
+      const approvedGuidance = await conditionRepository.getConditionById(
+        aiResult.primaryCondition.id,
+        true // onlyApproved = true
+      );
+
+      // 6. Build persistent assessment record
+      const consentTimestamp = typeof req.body.consentTimestamp === 'string' ? req.body.consentTimestamp : new Date().toISOString();
+      const consentNoticeVersion = typeof req.body.consentNoticeVersion === 'string' ? req.body.consentNoticeVersion : '1.0';
+
+      const assessmentRecord: AssessmentRecord = {
+        assessmentId,
+        userId: req.user!.uid,
+        cropType: 'TEA',
+        district: fieldContext?.district,
+        plantationArea: fieldContext?.plantationArea,
+        plantStage: fieldContext?.plantStage,
+        symptomDescription: fieldContext?.symptomDescription,
+        symptomDuration: fieldContext?.symptomDuration,
+        affectedArea: fieldContext?.affectedArea,
+        weatherConditions: fieldContext?.weatherConditions,
+        primaryCondition: aiResult.primaryCondition,
+        alternativeConditions: aiResult.alternativeConditions,
+        visualObservations: aiResult.visualObservations,
+        possibleSymptoms: aiResult.possibleSymptoms,
+        contextConsiderations: aiResult.contextConsiderations,
+        followUpQuestions: aiResult.followUpQuestions,
+        unknownFactors: aiResult.unknownFactors,
+        photoQuality: aiResult.photoQuality,
+        expertReviewRecommended: aiResult.expertReviewRecommended,
+        guidance: approvedGuidance || undefined,
+        guidanceIds: [aiResult.primaryCondition.id],
+        disclaimer: aiResult.disclaimer,
+        consentTimestamp,
+        consentNoticeVersion,
+        images: assessmentImages,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      // 7. Persist in Firestore
+      await assessmentRepository.createAssessment(assessmentRecord);
+
+      return res.status(200).json({
+        success: true,
+        assessment: assessmentRecord,
       });
-      if (!sizeValidation.valid) {
-        return res.status(400).json({ error: `Image ${i + 1}: ${sizeValidation.error}` });
-      }
-
-      // Magic byte signature validation
-      const signature = validateImageSignature(buffer);
-      if (!signature.valid) {
-        return res.status(400).json({ error: `Image ${i + 1}: ${signature.error}` });
-      }
-
-      validatedImages.push({
-        base64Data: cleanBase64,
-        mimeType: signature.mimeType || mimeType,
-      });
-
-      const imageId = `img-${Date.now()}-${i + 1}`;
-      assessmentImages.push({
-        imageId,
-        storagePath: `users/${req.user!.uid}/assessments/asm-${Date.now()}/leaf-image-0${i + 1}.jpg`,
-        downloadUrl: `data:${signature.mimeType || mimeType};base64,${cleanBase64}`,
-        mimeType: signature.mimeType || mimeType,
-        fileSize: buffer.length,
-        uploadedAt: new Date().toISOString(),
-      });
+    } catch (error: unknown) {
+      console.error('[Assessment Analyze Error]:', error);
+      const message = error instanceof Error ? error.message : 'Analysis failed due to internal error.';
+      return res.status(500).json({ error: message });
     }
-
-    // Call real Gemini multimodal vision model
-    const aiResult = await analyzeTeaLeafWithGemini(validatedImages, fieldContext);
-
-    // Retrieve verified TRI guidance
-    const guidance = db.getConditionById(aiResult.primaryCondition.id) || VERIFIED_CONDITIONS_CATALOG[aiResult.primaryCondition.id];
-
-    // Build assessment record
-    const assessmentId = `asm-${Date.now()}`;
-    const assessmentRecord: AssessmentRecord = {
-      assessmentId,
-      userId: req.user!.uid,
-      cropType: 'TEA',
-      district: fieldContext?.district,
-      plantationArea: fieldContext?.plantationArea,
-      plantStage: fieldContext?.plantStage,
-      symptomDescription: fieldContext?.symptomDescription,
-      symptomDuration: fieldContext?.symptomDuration,
-      affectedArea: fieldContext?.affectedArea,
-      weatherConditions: fieldContext?.weatherConditions,
-      primaryCondition: aiResult.primaryCondition,
-      alternativeConditions: aiResult.alternativeConditions,
-      visualObservations: aiResult.visualObservations,
-      possibleSymptoms: aiResult.possibleSymptoms,
-      contextConsiderations: aiResult.contextConsiderations,
-      followUpQuestions: aiResult.followUpQuestions,
-      unknownFactors: aiResult.unknownFactors,
-      photoQuality: aiResult.photoQuality,
-      expertReviewRecommended: aiResult.expertReviewRecommended,
-      guidance,
-      guidanceIds: [aiResult.primaryCondition.id],
-      disclaimer: aiResult.disclaimer,
-      images: assessmentImages,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    // Store securely in DB
-    db.createAssessment(assessmentRecord);
-
-    return res.status(200).json({
-      success: true,
-      assessment: assessmentRecord,
-    });
-  } catch (error: unknown) {
-    console.error('Assessment analysis failed:', error);
-    const message = error instanceof Error ? error.message : 'Unknown server error during image analysis.';
-    return res.status(500).json({ error: message });
   }
-});
+);
 
-// 2. List authenticated user's assessments
-app.get('/api/assessments', requireAuth, (req: AuthenticatedRequest, res: Response) => {
-  const list = db.listAssessmentsForUser(req.user!.uid);
+// List Authenticated User's Assessments
+app.get('/api/assessments', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const list = await assessmentRepository.listAssessmentsForUser(req.user!.uid);
   res.json({ assessments: list });
 });
 
-// 3. Get single assessment by ID
-app.get('/api/assessments/:id', requireAuth, (req: AuthenticatedRequest, res: Response) => {
-  const assessment = db.getAssessment(
+// Get Single Assessment by ID (Strictly verifies ownership or admin role)
+app.get('/api/assessments/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const assessment = await assessmentRepository.getAssessment(
     req.params.id,
     req.user!.uid,
     req.user!.role === 'admin'
@@ -280,46 +265,127 @@ app.get('/api/assessments/:id', requireAuth, (req: AuthenticatedRequest, res: Re
   res.json({ assessment });
 });
 
-// 4. Delete assessment by ID
-app.delete('/api/assessments/:id', requireAuth, (req: AuthenticatedRequest, res: Response) => {
-  const success = db.deleteAssessment(
+// Authenticated Private Image Stream: GET /api/assessments/:id/images/:imageId
+app.get('/api/assessments/:id/images/:imageId', async (req: Request, res: Response) => {
+  const authHeader = req.headers.authorization;
+  const token = (authHeader && authHeader.startsWith('Bearer '))
+    ? authHeader.split('Bearer ')[1].trim()
+    : (typeof req.query.token === 'string' ? req.query.token.trim() : null);
+
+  if (!token) {
+    return res.status(401).json({ error: 'Authentication required to stream assessment image.' });
+  }
+
+  const { auth: adminAuth, isLive } = getFirebaseAdmin();
+  let uid = token;
+  let isAdmin = false;
+
+  if (adminAuth && isLive) {
+    try {
+      const decoded = await adminAuth.verifyIdToken(token);
+      uid = decoded.uid;
+      isAdmin = decoded.admin === true;
+    } catch {
+      return res.status(401).json({ error: 'Invalid or expired authentication token.' });
+    }
+  }
+
+  const assessment = await assessmentRepository.getAssessment(
+    req.params.id,
+    uid,
+    isAdmin
+  );
+
+  if (!assessment) {
+    return res.status(404).json({ error: 'Assessment not found or access denied.' });
+  }
+
+  const targetImage = assessment.images.find((img) => img.imageId === req.params.imageId);
+  if (!targetImage) {
+    return res.status(404).json({ error: 'Image record not found in assessment.' });
+  }
+
+  const imageResult = await storageRepository.getImageBuffer(targetImage.storagePath);
+  if (!imageResult) {
+    return res.status(404).json({ error: 'Image file could not be retrieved from private storage.' });
+  }
+
+  res.setHeader('Content-Type', imageResult.mimeType);
+  res.setHeader('Cache-Control', 'private, max-age=86400');
+  res.send(imageResult.buffer);
+});
+
+// Delete Assessment & Clean Up Storage Files
+app.delete('/api/assessments/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const result = await assessmentRepository.deleteAssessment(
     req.params.id,
     req.user!.uid,
     req.user!.role === 'admin'
   );
 
-  if (!success) {
-    return res.status(404).json({ error: 'Assessment could not be deleted (not found or unauthorized).' });
+  if (!result.success) {
+    return res.status(404).json({ error: 'Assessment not found or unauthorized to delete.' });
   }
 
-  res.json({ success: true, message: 'Assessment and associated photographs removed successfully.' });
+  // Delete associated images from Firebase Storage
+  for (const path of result.imagePaths) {
+    await storageRepository.deleteImage(path);
+  }
+
+  res.json({ success: true, message: 'Assessment and private storage objects deleted successfully.' });
 });
 
-// 5. Conditions Library (Public read)
-app.get('/api/conditions', (_req: Request, res: Response) => {
-  const conditions = db.getConditions();
+// ==========================================
+// CONDITIONS & KNOWLEDGE API
+// ==========================================
+
+// List Conditions (Farmers see APPROVED only; Admins see all)
+app.get('/api/conditions', async (req: Request, res: Response) => {
+  const authHeader = req.headers.authorization;
+  let isAdmin = false;
+
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.split('Bearer ')[1].trim();
+    const { auth: adminAuth, isLive } = getFirebaseAdmin();
+    if (adminAuth && isLive) {
+      try {
+        const decoded = await adminAuth.verifyIdToken(token);
+        isAdmin = decoded.admin === true;
+      } catch {
+        // Not admin
+      }
+    }
+  }
+
+  const conditions = await conditionRepository.listConditions(!isAdmin);
   res.json({ conditions });
 });
 
-// 6. Single condition guidance
-app.get('/api/conditions/:id', (req: Request, res: Response) => {
-  const condition = db.getConditionById(req.params.id);
+// Single Condition Guidance
+app.get('/api/conditions/:id', async (req: Request, res: Response) => {
+  const condition = await conditionRepository.getConditionById(req.params.id, false);
   if (!condition) {
-    return res.status(404).json({ error: 'Condition not found.' });
+    return res.status(404).json({ error: 'Condition record not found.' });
   }
   res.json({ condition });
 });
 
-// 7. Feedback submission
-app.post('/api/feedback', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+// Submit User Feedback (Enforces that assessmentId belongs to req.user)
+app.post('/api/feedback', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   const { assessmentId, conditionId, rating, comments } = req.body;
 
   if (!assessmentId || !conditionId || !rating) {
-    return res.status(400).json({ error: 'Missing required feedback fields.' });
+    return res.status(400).json({ error: 'Missing required feedback parameters.' });
+  }
+
+  // Verify that the assessment belongs to the authenticated user!
+  const assessment = await assessmentRepository.getAssessment(assessmentId, req.user!.uid);
+  if (!assessment) {
+    return res.status(403).json({ error: 'Cannot submit feedback for an assessment that does not belong to you.' });
   }
 
   const feedback: UserFeedback = {
-    feedbackId: `fb-${Date.now()}`,
+    feedbackId: `fb-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
     userId: req.user!.uid,
     userEmail: req.user!.email,
     assessmentId,
@@ -329,60 +395,83 @@ app.post('/api/feedback', requireAuth, (req: AuthenticatedRequest, res: Response
     createdAt: new Date().toISOString(),
   };
 
-  db.addFeedback(feedback);
+  await feedbackRepository.addFeedback(feedback);
   res.json({ success: true, feedback });
 });
 
-// 8. Admin Summary & Management
-app.get('/api/admin/summary', requireAuth, requireAdmin, (_req: AuthenticatedRequest, res: Response) => {
-  const summary = db.getAdminSummary();
-  res.json(summary);
+// ==========================================
+// ADMINISTRATOR API
+// ==========================================
+
+// Administrator Summary Metrics
+app.get('/api/admin/summary', requireAuth, requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
+  const [totalUsers, stats, totalFeedback, recentFeedback] = await Promise.all([
+    userRepository.countUsers(),
+    assessmentRepository.getGlobalAssessmentStats(),
+    feedbackRepository.countFeedback(),
+    feedbackRepository.listFeedback(),
+  ]);
+
+  res.json({
+    totalUsers,
+    totalAssessments: stats.totalAssessments,
+    conditionDistribution: stats.conditionDistribution,
+    totalFeedback,
+    recentAssessments: stats.recentAssessments,
+    recentFeedback: recentFeedback.slice(0, 5),
+  });
 });
 
-// 9. Admin add condition
-app.post('/api/admin/conditions', requireAuth, requireAdmin, (req: AuthenticatedRequest, res: Response) => {
+// Admin Create Condition
+app.post('/api/admin/conditions', requireAuth, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   const data = req.body as VerifiedGuidance;
   if (!data.conditionId || !data.name || !data.category) {
     return res.status(400).json({ error: 'Missing conditionId, name, or category.' });
   }
 
-  const saved = db.upsertCondition({
+  const saved = await conditionRepository.upsertCondition({
     ...data,
+    reviewerUid: req.user!.uid,
     lastReviewed: new Date().toISOString().split('T')[0],
   });
+
   res.json({ success: true, condition: saved });
 });
 
-// 10. Admin update condition
-app.put('/api/admin/conditions/:id', requireAuth, requireAdmin, (req: AuthenticatedRequest, res: Response) => {
-  const existing = db.getConditionById(req.params.id);
+// Admin Update Condition
+app.put('/api/admin/conditions/:id', requireAuth, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  const existing = await conditionRepository.getConditionById(req.params.id);
   if (!existing) {
-    return res.status(404).json({ error: 'Condition not found.' });
+    return res.status(404).json({ error: 'Condition record not found.' });
   }
 
   const updated: VerifiedGuidance = {
     ...existing,
     ...req.body,
     conditionId: existing.conditionId,
+    reviewerUid: req.user!.uid,
     lastReviewed: new Date().toISOString().split('T')[0],
   };
 
-  db.upsertCondition(updated);
+  await conditionRepository.upsertCondition(updated);
   res.json({ success: true, condition: updated });
 });
 
-// 11. Admin delete condition
-app.delete('/api/admin/conditions/:id', requireAuth, requireAdmin, (req: AuthenticatedRequest, res: Response) => {
-  const success = db.deleteCondition(req.params.id);
+// Admin Delete Condition
+app.delete('/api/admin/conditions/:id', requireAuth, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  const success = await conditionRepository.deleteCondition(req.params.id);
   if (!success) {
-    return res.status(404).json({ error: 'Condition not found.' });
+    return res.status(404).json({ error: 'Condition record not found.' });
   }
-  res.json({ success: true, message: 'Condition record deleted successfully.' });
+  res.json({ success: true, message: 'Condition deleted successfully.' });
 });
 
-// 12. Dataset evaluation sample images
+// Dataset Samples Metadata
 app.get('/api/dataset/samples', (_req: Request, res: Response) => {
-  res.json({ samples: DATASET_EVALUATION_SAMPLES });
+  res.json({
+    samples: DATASET_EVALUATION_SAMPLES,
+    hasLocalDatasetImages: HAS_LOCAL_DATASET_IMAGES,
+  });
 });
 
 // ==========================================
@@ -398,7 +487,6 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    // Serve static files in production
     app.use(express.static(path.join(__dirname, 'dist')));
     app.get('*', (_req: Request, res: Response) => {
       res.sendFile(path.join(__dirname, 'dist', 'index.html'));
@@ -406,11 +494,11 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`[CropLens AI] Server running on port ${PORT} (isProduction: ${isProduction})`);
+    console.log(`[CropLens AI] Server running on http://0.0.0.0:${PORT} (Production: ${isProduction})`);
   });
 }
 
 startServer().catch((err) => {
-  console.error('[CropLens AI] Failed to start server:', err);
+  console.error('[CropLens AI] Server start failure:', err);
   process.exit(1);
 });

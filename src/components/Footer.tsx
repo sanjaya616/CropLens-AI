@@ -121,9 +121,15 @@ export const Footer: React.FC = () => {
             © {new Date().getFullYear()} CropLens AI · Academic Project for Sri Lankan Tea Sector.
           </div>
           <div className="flex items-center gap-4 text-stone-300">
-            <span>Powered by Multimodal Gemini Vision</span>
+            <a href="/privacy" className="hover:text-emerald-400 transition-colors">
+              Privacy & Data Governance
+            </a>
             <span aria-hidden="true">·</span>
-            <span>Firebase Cloud Infrastructure</span>
+            <a href="/dataset" className="hover:text-emerald-400 transition-colors">
+              Dataset v5 Specs
+            </a>
+            <span aria-hidden="true">·</span>
+            <span>Multimodal Gemini Vision</span>
           </div>
         </div>
       </div>

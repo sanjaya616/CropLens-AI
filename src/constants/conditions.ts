@@ -17,14 +17,15 @@ export const SRI_LANKA_TEA_DISTRICTS = [
 ];
 
 export const PLANT_STAGES = [
+  { value: 'NOT_SPECIFIED', label: 'Not specified' },
   { value: 'NURSERY', label: 'Nursery / Cutting' },
   { value: 'YOUNG_TEA', label: 'Young Tea (< 3 years)' },
   { value: 'MATURE_BUSH', label: 'Mature Bush (In plucking)' },
   { value: 'PRUNED_BUSH', label: 'Pruned / Recovering Bush' },
-  { value: 'UNKNOWN', label: 'Not specified' },
 ];
 
 export const WEATHER_CONDITIONS = [
+  'Not known / Not specified',
   'Continuous Monsoon Rain / Heavy Dew',
   'Mist / Extended High Humidity (> 85%)',
   'Intermittent Sun and Rain',
@@ -42,6 +43,8 @@ export const OFFICIAL_TRI_SOURCES = {
   RATNAPURA_STATION: 'Low Country Regional Centre, Ratnapura, Sri Lanka',
 };
 
+// All initial conditions are marked PENDING_REVIEW per Priority 6.
+// They require administrator review and approval before being marked APPROVED.
 export const VERIFIED_CONDITIONS_CATALOG: Record<ConditionId, VerifiedGuidance> = {
   ALGAL_LEAF_SPOT: {
     conditionId: 'ALGAL_LEAF_SPOT',
@@ -65,14 +68,13 @@ export const VERIFIED_CONDITIONS_CATALOG: Record<ConditionId, VerifiedGuidance> 
       'Maintain adequate canopy aeration through regulated shade tree pruning (e.g., Erythrina and Gliricidia)',
       'Ensure balanced soil nutrition, avoiding potassium and zinc deficiencies which weaken the leaf cuticle',
       'Prune severely infested lower foliage during regular field sanitary rounds',
-      'Consult regional Tea Research Institute advisory officers before applying any copper-based prophylactic sprays',
+      'Consult regional Tea Research Institute advisory officers before applying any prophylactic sprays',
     ],
     officialSourceTitle: 'TRI Sri Lanka - Plant Pathology Division (Foliar Diseases)',
     officialSourceUrl: OFFICIAL_TRI_SOURCES.PATHOLOGY,
     publicationDate: '2023',
     lastReviewed: '2025-01-15',
-    reviewStatus: 'approved',
-    exampleImageUrl: 'https://images.unsplash.com/photo-1576045057995-568f588f82fb?auto=format&fit=crop&w=800&q=80',
+    reviewStatus: 'pending_review', // Strictly PENDING_REVIEW until approved
   },
 
   BLACK_BLIGHT: {
@@ -97,14 +99,13 @@ export const VERIFIED_CONDITIONS_CATALOG: Record<ConditionId, VerifiedGuidance> 
       'Carefully collect and remove dead blackened leaves clinging to stems during field sanitation',
       'Prune low hanging and dense intertwining branches to promote rapid morning drying of the canopy',
       'Regulate high shade trees to improve air circulation across tea rows',
-      'Follow certified TRI advisory circulars for approved fungicide treatment schedules in epidemic zones',
+      'Follow certified TRI advisory circulars for approved management schedules in epidemic zones',
     ],
     officialSourceTitle: 'TRI Sri Lanka - Plant Pathology Division (Canopy & Stem Blights)',
     officialSourceUrl: OFFICIAL_TRI_SOURCES.PATHOLOGY,
     publicationDate: '2023',
     lastReviewed: '2025-01-15',
-    reviewStatus: 'approved',
-    exampleImageUrl: 'https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=800&q=80',
+    reviewStatus: 'pending_review', // Strictly PENDING_REVIEW until approved
   },
 
   BLISTER_BLIGHT: {
@@ -129,14 +130,13 @@ export const VERIFIED_CONDITIONS_CATALOG: Record<ConditionId, VerifiedGuidance> 
       'Maintain strict 7 to 8-day plucking rounds to remove susceptible young flush before blisters mature and sporulate',
       'Prune tea bushes during dry weather periods so bud break coincides with sunny months',
       'Regulate upper shade canopy to ensure tea leaves dry within 2 hours of sunrise',
-      'Refer to TRI Circular P-02 for official blister forecast models and approved prophylactic copper formulations',
+      'Refer to TRI Circular P-02 for official blister forecast models and approved prophylactic schedules',
     ],
     officialSourceTitle: 'TRI Sri Lanka - Plant Pathology Advisory Circulars (Blister Blight)',
     officialSourceUrl: OFFICIAL_TRI_SOURCES.PATHOLOGY,
     publicationDate: '2024',
     lastReviewed: '2025-02-10',
-    reviewStatus: 'approved',
-    exampleImageUrl: 'https://images.unsplash.com/photo-1582738411706-bfc8e691d1c2?auto=format&fit=crop&w=800&q=80',
+    reviewStatus: 'pending_review', // Strictly PENDING_REVIEW until approved
   },
 
   GRAY_BLIGHT: {
@@ -167,8 +167,7 @@ export const VERIFIED_CONDITIONS_CATALOG: Record<ConditionId, VerifiedGuidance> 
     officialSourceUrl: OFFICIAL_TRI_SOURCES.PATHOLOGY,
     publicationDate: '2023',
     lastReviewed: '2025-01-20',
-    reviewStatus: 'approved',
-    exampleImageUrl: 'https://images.unsplash.com/photo-1589182373726-e4f658ab50f0?auto=format&fit=crop&w=800&q=80',
+    reviewStatus: 'pending_review', // Strictly PENDING_REVIEW until approved
   },
 
   SPIDER_MITES: {
@@ -193,14 +192,13 @@ export const VERIFIED_CONDITIONS_CATALOG: Record<ConditionId, VerifiedGuidance> 
       'Conserve natural predators such as predatory phytoseiid mites, ladybird beetles, and stethorus beetles',
       'Avoid unauthorized broad-spectrum synthetic pyrethroid insecticides which wipe out natural mite predators',
       'Pave or wet dusty estate road sections adjoining tea fields to suppress dust deposits on leaves',
-      'During drought spells, maintain bush hydration and consult TRI Entomology division for approved selective miticides',
+      'During drought spells, maintain bush hydration and consult TRI Entomology division for approved selective options',
     ],
     officialSourceTitle: 'TRI Sri Lanka - Entomology & Nematology Division (Mite Pest Management)',
     officialSourceUrl: OFFICIAL_TRI_SOURCES.ENTOMOLOGY,
     publicationDate: '2024',
     lastReviewed: '2025-02-15',
-    reviewStatus: 'approved',
-    exampleImageUrl: 'https://images.unsplash.com/photo-1597848212624-a19eb35e2651?auto=format&fit=crop&w=800&q=80',
+    reviewStatus: 'pending_review', // Strictly PENDING_REVIEW until approved
   },
 
   HEALTHY: {
@@ -230,8 +228,7 @@ export const VERIFIED_CONDITIONS_CATALOG: Record<ConditionId, VerifiedGuidance> 
     officialSourceUrl: OFFICIAL_TRI_SOURCES.HOME,
     publicationDate: '2024',
     lastReviewed: '2025-01-10',
-    reviewStatus: 'approved',
-    exampleImageUrl: 'https://images.unsplash.com/photo-1564834724105-918b73d1b9e0?auto=format&fit=crop&w=800&q=80',
+    reviewStatus: 'pending_review', // Strictly PENDING_REVIEW until approved
   },
 
   UNKNOWN: {
@@ -252,14 +249,14 @@ export const VERIFIED_CONDITIONS_CATALOG: Record<ConditionId, VerifiedGuidance> 
       'Collect sample specimens for examination by local tea estate agricultural extension officers',
     ],
     preventionInformation: [
-      'Do not apply chemical pesticides speculatively without positive identification',
+      'Do not apply chemical products speculatively without positive identification',
       'Monitor field changes over the next 5-7 days and re-photograph if symptoms evolve',
       'Contact the nearest Tea Research Institute advisory extension office',
     ],
     officialSourceTitle: 'TRI Sri Lanka - Advisory & Extension Services',
     officialSourceUrl: OFFICIAL_TRI_SOURCES.HOME,
     lastReviewed: '2025-01-01',
-    reviewStatus: 'approved',
+    reviewStatus: 'pending_review',
   },
 
   NOT_TEA: {
@@ -283,7 +280,7 @@ export const VERIFIED_CONDITIONS_CATALOG: Record<ConditionId, VerifiedGuidance> 
     officialSourceTitle: 'CropLens AI - Crop Scope Policy',
     officialSourceUrl: OFFICIAL_TRI_SOURCES.HOME,
     lastReviewed: '2025-01-01',
-    reviewStatus: 'approved',
+    reviewStatus: 'pending_review',
   },
 
   POOR_IMAGE: {
@@ -309,11 +306,14 @@ export const VERIFIED_CONDITIONS_CATALOG: Record<ConditionId, VerifiedGuidance> 
     officialSourceTitle: 'CropLens AI - Quality Standards',
     officialSourceUrl: OFFICIAL_TRI_SOURCES.HOME,
     lastReviewed: '2025-01-01',
-    reviewStatus: 'approved',
+    reviewStatus: 'pending_review',
   },
 };
 
-// Verified sample images from the Mendeley Sri Lankan Tea Leaf Dataset v5 evaluation pool
+// Priority 7: Misleading Unsplash sample URLs removed.
+// Local dataset binary files must be provided from Mendeley Sri Lankan Tea Leaf Dataset v5 (CC BY 4.0).
+export const HAS_LOCAL_DATASET_IMAGES = false;
+
 export const DATASET_EVALUATION_SAMPLES: DatasetSample[] = [
   {
     id: 'smp-blister-01',
@@ -321,7 +321,6 @@ export const DATASET_EVALUATION_SAMPLES: DatasetSample[] = [
     commonName: 'Blister Blight (Exobasidium vexans)',
     category: 'disease',
     scientificName: 'Exobasidium vexans',
-    imageUrl: 'https://images.unsplash.com/photo-1582738411706-bfc8e691d1c2?auto=format&fit=crop&w=600&q=80',
     sourceDataset: 'Mendeley Sri Lankan Tea Leaf Dataset v5 (CC BY 4.0)',
     description: 'Tender young tea leaf exhibiting typical translucent bulging blisters with white sporulating under-surface.',
   },
@@ -331,7 +330,6 @@ export const DATASET_EVALUATION_SAMPLES: DatasetSample[] = [
     commonName: 'Gray Blight (Pestalotiopsis theae)',
     category: 'disease',
     scientificName: 'Pestalotiopsis theae',
-    imageUrl: 'https://images.unsplash.com/photo-1589182373726-e4f658ab50f0?auto=format&fit=crop&w=600&q=80',
     sourceDataset: 'Mendeley Sri Lankan Tea Leaf Dataset v5 (CC BY 4.0)',
     description: 'Mature tea leaf displaying concentric circular gray patches with distinct dark margins and tiny pinpoint spore dots.',
   },
@@ -341,7 +339,6 @@ export const DATASET_EVALUATION_SAMPLES: DatasetSample[] = [
     commonName: 'Algal Leaf Spot (Cephaleuros virescens)',
     category: 'disease',
     scientificName: 'Cephaleuros virescens',
-    imageUrl: 'https://images.unsplash.com/photo-1576045057995-568f588f82fb?auto=format&fit=crop&w=600&q=80',
     sourceDataset: 'Mendeley Sri Lankan Tea Leaf Dataset v5 (CC BY 4.0)',
     description: 'Lower canopy mature foliage showing velvety circular orange-brown rust-like algal patches.',
   },
@@ -351,7 +348,6 @@ export const DATASET_EVALUATION_SAMPLES: DatasetSample[] = [
     commonName: 'Spider Mites (Oligonychus coffeae)',
     category: 'pest',
     scientificName: 'Oligonychus coffeae',
-    imageUrl: 'https://images.unsplash.com/photo-1597848212624-a19eb35e2651?auto=format&fit=crop&w=600&q=80',
     sourceDataset: 'Mendeley Sri Lankan Tea Leaf Dataset v5 (CC BY 4.0)',
     description: 'Bronze and coppery discolored tea leaf surface with micro-webbing along midrib caused by sap-sucking arachnid pests.',
   },
@@ -361,7 +357,6 @@ export const DATASET_EVALUATION_SAMPLES: DatasetSample[] = [
     commonName: 'Black Blight (Corticium theae)',
     category: 'disease',
     scientificName: 'Corticium theae',
-    imageUrl: 'https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=600&q=80',
     sourceDataset: 'Mendeley Sri Lankan Tea Leaf Dataset v5 (CC BY 4.0)',
     description: 'Dark blackened patch spreading across leaf blade with characteristic necrotic tissue drying.',
   },
@@ -371,7 +366,6 @@ export const DATASET_EVALUATION_SAMPLES: DatasetSample[] = [
     commonName: 'Healthy Tea Leaf (Camellia sinensis)',
     category: 'healthy',
     scientificName: 'Camellia sinensis',
-    imageUrl: 'https://images.unsplash.com/photo-1564834724105-918b73d1b9e0?auto=format&fit=crop&w=600&q=80',
     sourceDataset: 'Mendeley Sri Lankan Tea Leaf Dataset v5 (CC BY 4.0)',
     description: 'Vibrant, glossy, uniform green tea foliage with intact margins, free from foliar pathogens and mite damage.',
   },
